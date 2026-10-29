@@ -7,6 +7,84 @@ const {
   Setting,
 } = require("obsidian");
 
+function readHeadingPath(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length &&
+      parsed.every((part) => typeof part === "string")
+    )
+      return parsed;
+  } catch {
+    // Older callers may send a single heading name.
+  }
+  return [String(value)];
+}
+
+function headingPathAt(headings, targetIndex) {
+  const stack = [];
+  for (let i = 0; i <= targetIndex; i++) {
+    const heading = headings[i];
+    while (stack.length && stack.at(-1).level >= heading.level) stack.pop();
+    stack.push({ title: heading.heading, level: heading.level });
+  }
+  return stack.map((entry) => entry.title);
+}
+
+function matchingHeadingLine(cache, params) {
+  const headings = cache?.headings || [];
+  const requestedPath = readHeadingPath(params.headingPath);
+  const matches = headings
+    .map((heading, index) => ({ heading, index }))
+    .filter(({ heading, index }) => {
+      if (requestedPath) {
+        return (
+          JSON.stringify(headingPathAt(headings, index)) ===
+          JSON.stringify(requestedPath)
+        );
+      }
+      return (
+        params.heading &&
+        heading.heading.toLocaleLowerCase() ===
+          String(params.heading).toLocaleLowerCase()
+      );
+    });
+  if (!matches.length) return null;
+  const lineHint = Math.max(0, (Number(params.line) || 1) - 1);
+  const selected = matches.reduce((best, candidate) => {
+    const candidateLine = candidate.heading.position.start.line;
+    const bestLine = best.heading.position.start.line;
+    return Math.abs(candidateLine - lineHint) < Math.abs(bestLine - lineHint)
+      ? candidate
+      : best;
+  });
+  return selected.heading.position.start.line + 1;
+}
+
+function blockLine(cache, params, content = "") {
+  const blockId = params.blockId || params.block || "";
+  if (!blockId) return null;
+  const key = blockId.startsWith("^") ? blockId : `^${blockId}`;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = String(content)
+    .split(/\r?\n/)
+    .flatMap((line, index) =>
+      new RegExp(`(?:^|\\s)${escaped}\\s*$`, "u").test(line) ? [index + 1] : [],
+    );
+  if (matches.length) {
+    const lineHint = Math.max(1, Number(params.line) || 1);
+    return matches.reduce((best, line) =>
+      Math.abs(line - lineHint) < Math.abs(best - lineHint) ? line : best,
+    );
+  }
+  const block = cache?.blocks?.[key];
+  return Number.isInteger(block?.position?.start?.line)
+    ? block.position.start.line + 1
+    : null;
+}
+
 module.exports = class MarginBridge extends Plugin {
   async onload() {
     this.settings = {
@@ -59,15 +137,16 @@ module.exports = class MarginBridge extends Plugin {
       const view = leaf.view;
       if (!(view instanceof MarkdownView)) return;
       await view.setState({ ...view.getState(), mode: "source" });
-      const heading = (
-        this.app.metadataCache.getFileCache(file)?.headings || []
-      ).find(
-        (h) => h.heading.toLowerCase() === (params.heading || "").toLowerCase(),
+      const cache = this.app.metadataCache.getFileCache(file);
+      const headingLine = matchingHeadingLine(cache, params);
+      const requested =
+        blockLine(cache, params, view.editor.getValue()) ??
+        headingLine ??
+        Math.max(1, Number(params.line) || 1);
+      const line = Math.min(
+        Math.max(0, requested - 1),
+        view.editor.lineCount() - 1,
       );
-      const requested = heading
-        ? heading.position.start.line + 1
-        : Math.max(0, (Number(params.line) || 1) - 1);
-      const line = Math.min(requested, view.editor.lineCount() - 1);
       view.editor.setCursor({ line, ch: 0 });
       view.editor.scrollIntoView(
         { from: { line, ch: 0 }, to: { line, ch: 0 } },

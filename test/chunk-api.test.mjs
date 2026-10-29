@@ -134,9 +134,12 @@ test("region API persists anchored notes, exports bundles, and supplies fresh in
     text: "Explain this definition.",
     anchor,
   });
-  assert.ok(answer.evidence.some((e) => e.id === "C1"));
+  assert.ok(
+    answer.evidence.some((e) => e.id === "C1" || e.handles?.includes("C1")),
+  );
   assert.match(
-    answer.evidence.find((e) => e.id === "S1").text,
+    answer.evidence.find((e) => e.id === "S1" || e.handles?.includes("S1"))
+      .text,
     /contraction/i,
     "recognized region content must be available even when the original text layer is empty",
   );
@@ -150,7 +153,13 @@ test("region API persists anchored notes, exports bundles, and supplies fresh in
     text: "Explain this definition.",
     anchor,
   });
-  assert.ok(after.evidence.every((e) => !e.id.startsWith("C")));
+  assert.ok(
+    after.evidence.every(
+      (e) =>
+        !e.id.startsWith("C") &&
+        !e.handles?.some((handle) => /^C\d+$/.test(handle)),
+    ),
+  );
   assert.ok(
     after.evidence
       .filter((e) => e.path)

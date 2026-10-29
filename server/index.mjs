@@ -49,6 +49,7 @@ server.listen(port, "127.0.0.1", () =>
 );
 async function close() {
   server.close();
+  await app.locals.agentHarness?.stop();
   await vite?.close();
   store.close();
   process.exit(0);

@@ -17,6 +17,10 @@ import type { Anchor, Artifact, Config, Session } from "./types";
 import { Markdown } from "./Markdown";
 import { api } from "./api";
 import { Tag } from "./ui";
+import { AgentActivity } from "./AgentActivity";
+import { ContextInspector } from "./ContextInspector";
+import { isTerminalRun, type AgentRun } from "./agent-types";
+import "./agent.css";
 import { ModelPicker } from "./ModelPicker";
 
 interface SpeechResult {
@@ -77,6 +81,52 @@ export function Notebook({
     [selected, setSelected] = useState<string[]>([]),
     [dictating, setDictating] = useState(false),
     [showAssumptions, setShowAssumptions] = useState(false);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [resumption, setResumption] = useState<{
+    openQuestions: Artifact[];
+    nextStep: string;
+    takeaway: string;
+  } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dataBusy, setDataBusy] = useState(false);
+  const [pinned, setPinned] = useState<string[]>([]),
+    [excluded, setExcluded] = useState<string[]>([]);
+  const submittingKey = useRef<string | null>(null);
+  const activeRun = runs.some((run) => !isTerminalRun(run));
+  const contextEvidence = [
+    ...new Map(
+      (session.artifacts || [])
+        .flatMap((a) => a.evidence || [])
+        .map((item) => [item.id, item]),
+    ).values(),
+  ];
+  async function refreshRuns() {
+    if (config.features?.agentHarness) {
+      const [nextRuns, nextResearch] = await Promise.all([
+        api<AgentRun[]>(`/sessions/${session.id}/runs`),
+        api<{ openQuestions: Artifact[]; nextStep: string; takeaway: string }>(
+          `/sessions/${session.id}/research`,
+        ),
+      ]);
+      setRuns(nextRuns);
+      setResumption(nextResearch);
+    }
+  }
+  useEffect(() => {
+    void refreshRuns().catch((e) => onError(e.message));
+  }, [session.id, session.artifacts?.length]);
+  async function continueRun(run: AgentRun) {
+    const next = await api<AgentRun>(`/runs/${run.id}/continue`, {
+      idempotencyKey: crypto.randomUUID(),
+      budgets: { maxModelCalls: 8, maxToolCalls: 20, maxSeconds: 240 },
+      contextOverrides: {
+        pinnedEvidenceIds: pinned,
+        excludedEvidenceIds: excluded,
+      },
+    });
+    setRuns((list) => [next, ...list]);
+    await onChanged();
+  }
   const end = useRef<HTMLDivElement>(null),
     input = useRef<HTMLTextAreaElement>(null),
     speech = useRef<SpeechEngine | null>(null);
@@ -105,23 +155,43 @@ export function Notebook({
     }
   }, [composeAction]);
   async function submit() {
-    if (!draft.trim() || busy || modelBusy) return;
-    if (tab === "tutor" && !config.aiEnabled) {
+    if (!draft.trim() || busy || modelBusy || (tab === "tutor" && activeRun))
+      return;
+    if (
+      tab === "tutor" &&
+      !config.aiEnabled &&
+      !config.features?.agentHarness
+    ) {
       onSettings();
       return;
     }
     setBusy(true);
     try {
-      await api(
-        `/sessions/${session.id}/${tab === "tutor" ? "tutor" : "artifacts"}`,
-        {
+      if (tab === "tutor" && config.features?.agentHarness) {
+        submittingKey.current ||= crypto.randomUUID();
+        const run = await api<AgentRun>(`/sessions/${session.id}/runs`, {
           text: draft,
-          kind,
           anchor,
           mode,
-          assumptions: assumptions || undefined,
-        },
-      );
+          idempotencyKey: submittingKey.current,
+          contextOverrides: {
+            pinnedEvidenceIds: pinned,
+            excludedEvidenceIds: excluded,
+          },
+        });
+        setRuns((list) => [run, ...list.filter((item) => item.id !== run.id)]);
+        submittingKey.current = null;
+      } else
+        await api(
+          `/sessions/${session.id}/${tab === "tutor" ? "tutor" : "artifacts"}`,
+          {
+            text: draft,
+            kind,
+            anchor,
+            mode,
+            assumptions: assumptions || undefined,
+          },
+        );
       setDraft("");
       setAssumptions("");
       await onChanged();
@@ -245,7 +315,9 @@ export function Notebook({
                   ? "YOU"
                   : a.origin === "prompt"
                     ? "READING PROMPT"
-                    : "AI SUGGESTION"}
+                    : a.origin === "tool"
+                      ? "SOURCE EXTRACTION"
+                      : "AI SUGGESTION"}
               </span>
               <span>{a.kind.replaceAll("-", " ")}</span>
               <time>
@@ -278,7 +350,77 @@ export function Notebook({
                 {a.anchor.section || `Page ${a.anchor.page}`}
               </button>
             )}
-            <Markdown text={a.text} onNote={onNote} />
+            <Markdown
+              text={a.text}
+              onNote={onNote}
+              evidence={
+                config.features?.citations === false
+                  ? undefined
+                  : a.evidence?.filter((item) => item.loadedInPrompt !== false)
+              }
+              citationContext={{
+                vaultRoot: config.vault.root,
+                vaultId: config.vaultId,
+                bridge: config.bridge,
+                sourceId: a.anchor?.sourceId || session.sourceId,
+              }}
+              onAnchor={onAnchor}
+            />
+            {a.runStatus && a.runStatus !== "completed" && (
+              <p className="run-result-status">
+                {a.runStatus} · this answer is incomplete
+              </p>
+            )}
+            {a.referenceResults && (
+              <details className="evidence">
+                <summary>Reference identification details</summary>
+                {a.referenceResults.map((result) => (
+                  <div key={result.label}>
+                    <p>
+                      [{result.label}] Entry: {result.status}.
+                      {result.reason ? ` ${result.reason}` : ""} Library match:{" "}
+                      {result.metadataMatch?.status || "unavailable"}
+                      {result.metadataMatch?.title
+                        ? ` · ${result.metadataMatch.title}`
+                        : ""}
+                      {result.metadataMatch?.matchedBy
+                        ? ` (${result.metadataMatch.matchedBy.replaceAll("_", " ")})`
+                        : ""}
+                      . Full text and cited claims require a separate read.
+                    </p>
+                    {(
+                      result.candidates ||
+                      (result.status !== "found" && result.text
+                        ? [{ text: result.text, page: result.page || 1 }]
+                        : [])
+                    ).map((candidate, index) => (
+                      <p key={index}>
+                        <small>Unresolved extracted candidate:</small>{" "}
+                        {candidate.text}
+                      </p>
+                    ))}
+                    {[
+                      ...new Set(
+                        result.pages || (result.page ? [result.page] : []),
+                      ),
+                    ].map((page) => (
+                      <button
+                        key={page}
+                        onClick={() =>
+                          onAnchor({
+                            sourceId: a.anchor?.sourceId || session.sourceId,
+                            page,
+                            quote: "",
+                          })
+                        }
+                      >
+                        Inspect source · page {page}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </details>
+            )}
             {a.assumptions && (
               <details className="assumptions">
                 <summary>Associated assumptions</summary>
@@ -351,11 +493,110 @@ export function Notebook({
               <div className="entry-footnote">
                 {a.origin === "prompt"
                   ? "Local reflection prompt · your answer stays in your words"
-                  : "AI-generated · verify against the original source"}
+                  : a.origin === "tool"
+                    ? "Extracted from the source bibliography · citation targets checked"
+                    : "AI-generated · verify against the original source"}
               </div>
             )}
           </article>
         ))}
+        {runs.slice(0, 3).map((run) => (
+          <AgentActivity
+            key={run.id}
+            run={run}
+            onChanged={async () => {
+              await onChanged();
+              await refreshRuns();
+            }}
+            onContinue={continueRun}
+            onError={onError}
+          />
+        ))}
+        {config.features?.agentHarness && (
+          <ContextInspector
+            evidence={contextEvidence}
+            pinned={pinned}
+            excluded={excluded}
+            onChange={(nextPinned, nextExcluded) => {
+              setPinned(nextPinned);
+              setExcluded(nextExcluded);
+            }}
+          />
+        )}
+        {resumption?.openQuestions.length ||
+        session.nextStep ||
+        session.takeaway ? (
+          <details className="resumption-card">
+            <summary>Resume inquiry · page {session.page}</summary>
+            {resumption?.openQuestions.at(-1) && (
+              <p>Last open question: {resumption.openQuestions.at(-1)?.text}</p>
+            )}
+            {(session.nextStep || session.takeaway) && (
+              <p>{session.nextStep || session.takeaway}</p>
+            )}
+          </details>
+        ) : null}
+        {config.features?.agentHarness && (
+          <details className="context-inspector">
+            <summary>Saved research data</summary>
+            <p className="fine-print">
+              Export saved runs and evidence from Settings. Clear diagnostic
+              details to keep answers and citations while removing tool
+              arguments, transcripts, and progress events.
+            </p>
+            <button
+              disabled={activeRun || dataBusy}
+              onClick={() => {
+                setDataBusy(true);
+                void api(`/sessions/${session.id}/diagnostics/purge`, {})
+                  .then(refreshRuns)
+                  .catch((e) => onError(e.message))
+                  .finally(() => setDataBusy(false));
+              }}
+            >
+              Clear diagnostic details
+            </button>
+            {confirmDelete ? (
+              <div>
+                <p>
+                  Delete all saved notebook entries, runs, and research state in
+                  this session? Vault notes and source files stay in place. This
+                  cannot be undone.
+                </p>
+                <button
+                  disabled={activeRun || dataBusy}
+                  onClick={() => {
+                    setDataBusy(true);
+                    void api(
+                      `/sessions/${session.id}/research-history/delete`,
+                      {},
+                    )
+                      .then(async () => {
+                        setPinned([]);
+                        setExcluded([]);
+                        setSelected([]);
+                        setConfirmDelete(false);
+                        await onChanged();
+                        await refreshRuns();
+                      })
+                      .catch((e) => onError(e.message))
+                      .finally(() => setDataBusy(false));
+                  }}
+                >
+                  Delete saved history
+                </button>
+                <button onClick={() => setConfirmDelete(false)}>Cancel</button>
+              </div>
+            ) : (
+              <button
+                disabled={activeRun || dataBusy}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete notebook history…
+              </button>
+            )}
+          </details>
+        )}
         <div ref={end} />
       </div>
       {selected.length > 0 && (
@@ -388,12 +629,20 @@ export function Notebook({
         </div>
         {tab === "tutor" && !config.aiEnabled && (
           <div className="inline-notice">
-            Choose an available model below, or enable tutoring in{" "}
+            {config.features?.agentHarness
+              ? "Bibliography lookups work locally. For other questions, choose a model below or enable tutoring in "
+              : "Choose an available model below, or enable tutoring in "}
             <button onClick={onSettings}>Settings</button>.
           </div>
         )}
         {tab === "tutor" && (
           <>
+            {config.cloud && (
+              <p className="fine-print">
+                Cloud run context: the selected source and this workspace’s
+                papers, retrieved vault passages, and workspace history.
+              </p>
+            )}
             <ModelPicker
               config={config}
               disabled={busy}
@@ -414,7 +663,10 @@ export function Notebook({
             tab === "tutor" ? "Ask the research tutor" : "Capture your thinking"
           }
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            submittingKey.current = null;
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
@@ -445,13 +697,16 @@ export function Notebook({
               value={mode}
               onChange={(e) => setMode(e.target.value)}
             >
-              <option value="discuss">Discuss this passage</option>
-              <option value="recall">Recall & feedback</option>
+              <option value="discuss">Answer</option>
+              {config.features?.agentHarness && (
+                <option value="investigate">Investigate</option>
+              )}
+              <option value="recall">Tutor · recall & feedback</option>
               <option value="assumptions">Check assumptions</option>
               <option value="connect">Compare related concepts</option>
               <option value="proof">Next proof hint</option>
               <option value="synthesize">Synthesis checkpoint</option>
-              <option value="edit">Refine my explanation</option>
+              <option value="edit">Draft from my words</option>
             </select>
           ) : (
             <select

@@ -1,0 +1,36 @@
+{
+  "answer": "The saved note records the connectivity assumption [N2]. The paper states the result on page 2 [S1], and its bibliography entry [11] is a paper reference.",
+  "evidence": [
+    {
+      "id": "ev_note_a",
+      "handles": ["N2"],
+      "title": "Algebraic Connectivity (Spectral Gap)",
+      "text": "For a connected undirected graph, the second-smallest Laplacian eigenvalue is positive.",
+      "kind": "user-note; unverified",
+      "path": "notes/Algebraic Connectivity (Spectral Gap).md",
+      "line": 18,
+      "section": "Connectivity",
+      "revision": "sha256:fixture-note-v1",
+      "provenance": {
+        "origin": "vault note",
+        "author": "not specified"
+      }
+    },
+    {
+      "id": "ev_source_a",
+      "handles": ["S1"],
+      "title": "Distributed Model Predictive Control with Connectivity-based Contracts",
+      "text": "The selected page describes the connectivity-based contract.",
+      "kind": "pdf-page",
+      "sourceId": "source_fixture",
+      "page": 2,
+      "revision": "pdf-fixture-v1",
+      "locator": {
+        "span": "paragraph 2"
+      },
+      "provenance": {
+        "origin": "extracted PDF page"
+      }
+    }
+  ]
+}

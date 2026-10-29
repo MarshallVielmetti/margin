@@ -1,0 +1,106 @@
+.citation-wrap {
+  position: relative;
+  display: inline;
+}
+.citation-trigger {
+  display: inline;
+  padding: 0;
+  color: var(--green);
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.citation-trigger:hover {
+  color: var(--ink);
+  background: var(--green-soft);
+}
+.citation-open {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  margin-left: 3px;
+  padding: 2px;
+  border-radius: 3px;
+  color: var(--green);
+  vertical-align: text-bottom;
+}
+.citation-open:hover {
+  background: var(--green-soft);
+  color: var(--ink);
+}
+.citation-open svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+.citation-unresolved {
+  border-bottom: 1px dotted #a56842;
+  color: #895b3c;
+  cursor: help;
+}
+.citation-preview {
+  position: relative;
+  margin: 8px 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+  overflow-wrap: anywhere;
+  max-height: min(70vh, 620px);
+  overflow: auto;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: 0 9px 30px #273c3224;
+  color: var(--ink);
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+}
+.citation-preview-heading,
+.citation-preview-meta,
+.citation-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.citation-preview-heading {
+  justify-content: space-between;
+}
+.citation-kind,
+.citation-preview-meta {
+  color: var(--muted);
+  font-size: 10px;
+}
+.citation-preview-meta {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+.citation-preview-text {
+  display: block;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  border-left: 2px solid #dce5d7;
+  background: #f8f9f5;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.citation-preview-actions button,
+.citation-preview-actions a {
+  padding: 4px 0;
+  color: var(--green);
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

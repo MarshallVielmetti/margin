@@ -1,9 +1,11 @@
+import { exportReadableMarkdown } from "../src/citations.mjs";
+import { installAgentAPI } from "./agent-api.mjs";
 import { Intake } from "./intake.mjs";
 import { homedir } from "node:os";
 import { Ollama } from "./ollama.mjs";
 import { DEFAULT_LOCAL_MODEL, openAIModels } from "./models.mjs";
 import { AUTO_LOCAL_MODEL, autoLocalAvailable, routeLocal } from "./router.mjs";
-import { ZoteroLibrary, checkedPdf } from "./zotero.mjs";
+import { ZoteroLibrary, checkedPdf, citationKey } from "./zotero.mjs";
 import { Retrieval } from "./retrieval.mjs";
 import express from "express";
 import multer from "multer";
@@ -268,6 +270,12 @@ export async function createApp({
     bridge: !!store.setting("bridge"),
     port,
     dataDir,
+    features: {
+      agentHarness: store.setting("agentHarness") !== false,
+      citations: store.setting("citationRendering") !== false,
+      sourceExpansion: store.setting("sourceExpansion") !== false,
+    },
+    vaultId: store.setting("vaultId") || vault.root,
   });
   const sessionArtifacts = (id) =>
     store
@@ -365,6 +373,40 @@ export async function createApp({
         throw fail("This region changed. Select it again in the PDF.");
     }
   };
+  const agent = installAgentAPI(app, {
+    store,
+    token,
+    get,
+    getVault: () => vault,
+    config,
+    selectedModel,
+    chatModels,
+    sessionArtifacts,
+    requireAnchor,
+    anchorSchema,
+    ollama,
+    apiKey,
+    fetchImpl,
+    sourcePdf,
+    getChunkContext: async (source, anchor) => {
+      if (!anchor.regionId) return {};
+      await sourcePdf(source);
+      const current = vault.root
+        ? (await scanVault(vault.root)).notes
+        : vault.notes;
+      const layout = anchor.regionId && layoutFor(source.id, anchor.revision);
+      const region = layout?.regions.find((r) => r.id === anchor.regionId);
+      const ids = new Set([region?.id, region?.parentId]);
+      return {
+        region,
+        contexts: intake
+          .contexts(source.id, "", current, anchor.revision)
+          .filter((item) => ids.has(item.regionId) && !item.stale)
+          .slice(0, 3),
+      };
+    },
+  });
+  app.locals.agentHarness = agent.harness;
   app.get("/api/bootstrap", (req, res) =>
     res.json({
       token,
@@ -440,6 +482,10 @@ export async function createApp({
     const input = z
       .object({
         vaultRoot: z.string().max(2000).optional(),
+        vaultId: z.string().max(2000).optional(),
+        agentHarness: z.boolean().optional(),
+        citationRendering: z.boolean().optional(),
+        sourceExpansion: z.boolean().optional(),
         aiEnabled: z.boolean().optional(),
         model: z.string().trim().min(1).max(100).optional(),
         bridge: z.boolean().optional(),
@@ -471,6 +517,10 @@ export async function createApp({
     if (input.vaultRoot !== undefined && input.vaultRoot !== vault.root)
       await reindex(input.vaultRoot);
     for (const key of [
+      "agentHarness",
+      "citationRendering",
+      "sourceExpansion",
+      "vaultId",
       "aiEnabled",
       "model",
       "bridge",
@@ -580,8 +630,11 @@ export async function createApp({
             title: note.title,
             authors: String(note.metadata.authors || ""),
             year: note.metadata.year,
+            doi: note.metadata.doi || note.metadata.DOI || "",
+            citekey: citationKey(note),
             kind: "pdf",
             pages: pdf.pages,
+            extraction: pdf.extraction,
             localFile: pdf.path,
             fingerprint: pdf.fingerprint,
             attachmentId: attachment.id,
@@ -608,6 +661,9 @@ export async function createApp({
             title: note.title,
             authors: String(note.metadata.authors || ""),
             kind: "reading-note",
+            year: note.metadata.year,
+            doi: note.metadata.doi || note.metadata.DOI || "",
+            citekey: citationKey(note),
             pages: [note.body],
             notePath: path,
             zotero: note.zotero,
@@ -769,6 +825,25 @@ export async function createApp({
     );
   });
   app.post("/api/sessions/:id/tutor", async (req, res) => {
+    if (agent.flags().agentHarness) {
+      const run = agent.start(req.params.id, {
+        text: req.body.text,
+        anchor: req.body.anchor,
+        mode: req.body.mode || "discuss",
+        idempotencyKey: req.body.idempotencyKey || randomUUID(),
+      });
+      const finished = await agent.harness.wait(run.id);
+      const artifact = store.get(
+        "artifact",
+        finished.artifactId || finished.finalArtifactId,
+      );
+      if (artifact) return res.json(artifact);
+      throw fail(
+        finished.error?.message ||
+          finished.error ||
+          "The run did not produce an answer. Your question is saved.",
+      );
+    }
     if (!config().aiEnabled)
       throw fail(
         "Choose an available model in the prompt box or enable tutoring in Settings.",
@@ -1001,18 +1076,47 @@ export async function createApp({
   });
   app.get("/api/export", (req, res) =>
     res.attachment("margin-research-history.json").json({
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       workspaces: store.list("workspace"),
       sessions: store.list("session"),
       sources: store.list("source").map(({ file, localFile, ...s }) => s),
-      artifacts: store.list("artifact"),
+      artifacts: store.list("artifact").map((artifact) => ({
+        ...artifact,
+        readableMarkdown: exportReadableMarkdown(
+          artifact.text,
+          (artifact.evidence || []).filter(
+            (item) => item.loadedInPrompt !== false,
+          ),
+          {
+            vaultRoot: vault.root,
+            vaultId: store.setting("vaultId") || vault.root,
+            sourceId:
+              artifact.anchor?.sourceId ||
+              store.get("session", artifact.sessionId)?.sourceId,
+          },
+        ),
+      })),
       relationships: store.list("relationship"),
       promotions: store.list("promotion"),
       documentLayouts: store.list("documentLayout"),
       layoutSnapshots: store.list("layoutSnapshot"),
       chunkContexts: store.list("chunkContext"),
       intakeJobs: store.list("intakeJob"),
+      agentRuns: store.list("agentRun"),
+      agentEvents: store
+        .listAgentRuns()
+        .flatMap((run) => store.getAgentEvents(run.id)),
+      toolCalls: store.list("toolCall"),
+      evidenceSnapshots: store.list("evidenceSnapshot"),
+      runEvidence: store.list("runEvidence"),
+      paperReferences: store.list("paperReference"),
+      sessionSummaries: store.list("sessionSummary"),
+      researchClaims: store.list("researchClaim"),
+      conceptOccurrences: store.list("conceptOccurrence"),
+      memoryProposals: store.list("memoryProposal"),
+      researchInquiries: store.list("researchInquiry"),
+      learningEvidence: store.list("learningEvidence"),
     }),
   );
   app.use("/api", (req, res) =>

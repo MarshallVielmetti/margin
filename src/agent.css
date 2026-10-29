@@ -1,0 +1,70 @@
+.agent-activity,
+.context-inspector,
+.resumption-card {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line, #d7d5ce);
+  border-radius: 8px;
+  background: var(--paper, #faf9f5);
+}
+.agent-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-status strong {
+  text-transform: capitalize;
+}
+.agent-activity button {
+  margin: 8px 0;
+}
+.agent-activity ol {
+  padding-left: 20px;
+  font-size: 12px;
+  max-height: 220px;
+  overflow: auto;
+}
+.agent-provisional {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.agent-provisional small {
+  color: var(--muted, #666);
+}
+.context-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 12px;
+}
+.context-item pre {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+  font: inherit;
+}
+.context-item label {
+  margin-right: 12px;
+}
+.resumption-card {
+  font-size: 12px;
+}
+.run-result-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #666);
+}
+
+.agent-activity time {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.agent-activity pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow: auto;
+}

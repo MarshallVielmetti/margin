@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env server/index.mjs --dev",
@@ -14,6 +14,8 @@
     "check": "npm test && npm run build"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@fontsource/libre-baskerville": "^5.3.0",
     "diff": "^8.0.2",

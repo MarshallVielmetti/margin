@@ -148,7 +148,14 @@ test("full local workflow: index, import, capture, checkpoint, promotion, undo, 
   );
   assert.equal(disabledTutor.status, 400);
   const exportData = await (await raw("/export")).json();
-  assert.equal(exportData.artifacts.length, 2);
+  assert.equal(exportData.artifacts.length, 3);
+  assert.equal(
+    exportData.artifacts.filter(
+      (item) => item.text === "Explain it" && item.origin === "user",
+    ).length,
+    1,
+    "an unavailable provider keeps exactly one saved user question",
+  );
   assert.equal(exportData.promotions[0].before.includes("Original"), true);
   const otherStore = new Store(dbPath);
   assert.equal(

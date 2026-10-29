@@ -99,6 +99,7 @@ export default function App() {
     tab: "capture" | "tutor";
     nonce: number;
   } | null>(null);
+  const pendingCitation = useRef<Anchor | null>(null);
   const booted = useRef(false),
     loadSequence = useRef(0);
   const notify = (message: string) => setToast(message);
@@ -148,7 +149,12 @@ export default function App() {
         if (sequence !== loadSequence.current) return;
         setSession(s);
         setSource(src);
-        setAnchor({ sourceId: src.id, page: s.page, quote: "" });
+        setAnchor(
+          pendingCitation.current?.sourceId === src.id
+            ? pendingCitation.current
+            : { sourceId: src.id, page: s.page, quote: "" },
+        );
+        pendingCitation.current = null;
       })
       .catch((e) => {
         if (sequence === loadSequence.current) notify(e.message);
@@ -244,6 +250,32 @@ export default function App() {
     setImporting(true);
   }
   async function navigateAnchor(a: Anchor) {
+    if (session && a.sourceId !== session.sourceId) {
+      try {
+        const targetSource = await api<Source>(
+          `/sources/${encodeURIComponent(a.sourceId)}`,
+        );
+        if (a.page < 1 || a.page > targetSource.pageCount)
+          throw new Error("This citation page is no longer available.");
+        const target =
+          data?.sessions.find(
+            (item) =>
+              item.sourceId === a.sourceId &&
+              item.workspaceId === session.workspaceId,
+          ) ||
+          (await api<Session>("/sessions", {
+            sourceId: a.sourceId,
+            workspaceId: session.workspaceId,
+          }));
+        await api(`/sessions/${target.id}`, { page: a.page }, "PATCH");
+        pendingCitation.current = a;
+        await refresh();
+        chooseSession(target);
+      } catch (error) {
+        notify((error as Error).message);
+      }
+      return;
+    }
     setAnchor(a);
     if (session && a.page !== session.page) {
       setSession({ ...session, page: a.page });
@@ -1690,6 +1722,39 @@ function SettingsView({
         >
           Save Zotero folders
         </button>
+      </section>
+      <section className="settings-card">
+        <h2>Research harness</h2>
+        <p>
+          Control automatic evidence retrieval and citation display. Saved
+          answers remain available when execution is disabled.
+        </p>
+        {(
+          [
+            ["agentHarness", "agentHarness", "Enable durable research runs"],
+            ["citationRendering", "citations", "Show named citation previews"],
+            [
+              "sourceExpansion",
+              "sourceExpansion",
+              "Allow source and bibliography expansion",
+            ],
+          ] as const
+        ).map(([setting, feature, label]) => (
+          <label className="checkbox-label" key={setting}>
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={config.features?.[feature] !== false}
+              onChange={(e) => void save({ [setting]: e.target.checked })}
+            />{" "}
+            {label}
+          </label>
+        ))}
+        <p className="fine-print">
+          AI note changes always create a reviewable proposal. Clear diagnostic
+          details or delete session history from the notebook’s Saved research
+          data controls.
+        </p>
       </section>
       <section className="settings-card">
         <div className="settings-card-title">
