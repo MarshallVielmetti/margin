@@ -3,7 +3,7 @@ import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { hash, extractNative, REGION_VERSION } from "./regions.mjs";
 import { extractPaddle } from "./paddle.mjs";
 
-export const INTAKE_VERSION = "intake-1";
+export const INTAKE_VERSION = "intake-2";
 const text = z.string().max(1800);
 const analysisSchema = z.object({
   summary: text,
@@ -63,6 +63,35 @@ const words = (s) =>
         ].includes(w),
     ),
   );
+const near = (a, b) =>
+  a.page === b.page &&
+  Math.min(a.box[2], b.box[2]) - Math.max(a.box[0], b.box[0]) >= -0.015 &&
+  Math.abs((a.box[1] + a.box[3] - b.box[1] - b.box[3]) / 2) < 0.15;
+export function chunkRetrievalQuery(region, regions) {
+  const parent = regions.find(
+    (r) => r.id === region.parentId && r.kind !== "page",
+  );
+  const prose = regions
+    .filter(
+      (r) =>
+        r.id !== region.id &&
+        ["paragraph", "heading"].includes(r.kind) &&
+        near(region, r) &&
+        words(r.text).size >= 4,
+    )
+    .sort(
+      (a, b) =>
+        Math.abs(a.box[1] - region.box[1]) - Math.abs(b.box[1] - region.box[1]),
+    )
+    .slice(0, 2);
+  return [
+    region.text.slice(0, 1600),
+    parent?.text.slice(0, 1400),
+    ...prose.map((r) => r.text.slice(0, 700)),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 export function regionCandidates(region, regions, limit = 6) {
   const query = words(region.text);
   return regions
@@ -71,14 +100,20 @@ export function regionCandidates(region, regions, limit = 6) {
       const terms = words(r.text),
         overlap = [...query].filter((w) => terms.has(w));
       const structural = r.id === region.parentId || r.parentId === region.id;
+      const nearby = near(region, r);
       return {
         ...r,
         score:
           overlap.length / Math.sqrt(Math.max(1, query.size * terms.size)) +
-          (structural ? 0.4 : 0),
+          (structural ? 0.4 : 0) +
+          (nearby
+            ? 0.12 * Math.exp(-Math.abs(r.box[1] - region.box[1]) * 12)
+            : 0),
         reason: structural
           ? "Nested region"
-          : "Shared terms; relationship unverified",
+          : nearby
+            ? "Nearby source context; relationship unverified"
+            : "Shared terms; relationship unverified",
       };
     })
     .filter((r) => r.score > 0)
@@ -163,6 +198,10 @@ export class Intake {
     };
   }
   start(sourceId, { extractor = "native", model = "", force = false } = {}) {
+    if (this.closing)
+      throw new Error(
+        "Intake is shutting down. Reload Margin after the server restarts.",
+      );
     const existing = this.active.get(sourceId);
     if (existing) return this.store.get("intakeJob", existing.id);
     const source = this.getSource(sourceId);
@@ -191,9 +230,16 @@ export class Intake {
       createdAt: new Date().toISOString(),
     });
     const controller = new AbortController();
-    this.active.set(sourceId, { id: job.id, controller });
+    let resolveDone;
+    const done = new Promise((resolve) => (resolveDone = resolve));
+    this.active.set(sourceId, { id: job.id, controller, done });
     // Schedule after the API returns. All state transitions and successful chunks are durable.
-    setImmediate(() => void this.run(job, source, force, controller.signal));
+    setImmediate(
+      () =>
+        void this.run(job, source, force, controller.signal).finally(
+          resolveDone,
+        ),
+    );
     return job;
   }
   cancel(sourceId) {
@@ -205,6 +251,12 @@ export class Intake {
       status: "cancelling",
       message: "Stopping intake…",
     });
+  }
+  async close() {
+    this.closing = true;
+    const pending = [...this.active.values()];
+    for (const active of pending) active.controller.abort();
+    await Promise.all(pending.map((active) => active.done));
   }
   async run(job, source, force, signal) {
     const save = (patch) => {
@@ -283,7 +335,7 @@ export class Intake {
         }
         const retrieved = await this.retrieval.retrieve(
           notes,
-          region.text.slice(0, 1600),
+          chunkRetrievalQuery(region, layout.regions),
           source,
           "",
           4,
@@ -409,7 +461,9 @@ export class Intake {
       )
       .map((c) => ({
         ...c,
-        stale: signature !== null && signature !== c.vaultSignature,
+        stale:
+          c.version !== INTAKE_VERSION ||
+          (signature !== null && signature !== c.vaultSignature),
       }));
   }
 }

@@ -36,6 +36,9 @@ Reading-note snapshots retain separate provenance and old sessions are preserved
 
 Hover a paragraph or equation in the PDF and click to select its region.
 Use **Expand** to select an enclosing definition, theorem, or page, then **Add note**, **Ask about this**, or **Context**.
+Use Cmd/Ctrl-click or Shift-click to add or remove regions, or turn on **Multi-select** so ordinary clicks toggle selection.
+Selections can span pages and are saved together with a note or question.
+Aligned mathematical rows, including subscripts and equation numbers, are grouped into a selectable equation block; Alt-click drills into its rows.
 The region menu offers the same selection through the keyboard.
 Notes retain page coordinates and extraction revision; earlier region anchors remain usable after a different extraction engine runs.
 
@@ -120,7 +123,7 @@ npm test
 npm run build
 ```
 
-46 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
+52 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
 Live validation opened the existing 10-page Tsitsiklis PDF, retrieved a cited `gemma4:12b` answer, and built the full semantic index.
 Browser verification confirmed the note deep link opens the PDF and exposes the local tutor controls.
 The updated Obsidian plugin must be reloaded before its new command appears.

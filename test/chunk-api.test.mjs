@@ -144,6 +144,60 @@ test("region API persists anchored notes, exports bundles, and supplies fresh in
     "recognized region content must be available even when the original text layer is empty",
   );
   assert.match(submitted.messages[1].content, /saved chunk context/);
+  const second = state.layout.regions.find(
+    (r) => r.page === 2 && r.kind !== "page",
+  );
+  const multi = {
+    sourceId: source.id,
+    page: 1,
+    quote: region.text + "\n\n" + second.text,
+    section: "2 regions",
+    regions: [region, second].map((r) => ({
+      regionId: r.id,
+      page: r.page,
+      revision: state.layout.revision,
+      quote: r.text,
+      box: r.box,
+    })),
+  };
+  const multiple = await call(`/sessions/${session.id}/artifacts`, {
+    text: "Connecting two regions across pages.",
+    anchor: multi,
+  });
+  assert.deepEqual(
+    multiple.anchor.regions.map((r) => r.regionId),
+    [region.id, second.id],
+  );
+  const multiAnswer = await call(`/sessions/${session.id}/tutor`, {
+    text: "Compare these regions.",
+    anchor: multi,
+  });
+  assert.deepEqual(
+    multiAnswer.evidence.filter((e) => /^S\d+$/.test(e.id)).map((e) => e.page),
+    [1, 2],
+  );
+  assert.equal(
+    multiAnswer.evidence.find((e) => e.id === "S2").regionId,
+    second.id,
+  );
+  const invalidMulti = await fetch(base + `/sessions/${session.id}/artifacts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Margin-Token": boot.token,
+    },
+    body: JSON.stringify({
+      text: "Invalid selection",
+      anchor: {
+        ...multi,
+        regions: [
+          multi.regions[0],
+          { ...multi.regions[1], regionId: "invented" },
+        ],
+      },
+    }),
+  });
+  assert.equal(invalidMulti.status, 400);
   await writeFile(noteFile, "# Contraction\nCompletely revised content.");
   const stale = await call(
     `/sources/${source.id}/chunks?regionId=${encodeURIComponent(region.id)}`,

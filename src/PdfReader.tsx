@@ -43,20 +43,22 @@ export default function PdfReader({
   sourceId,
   page,
   regions = [],
-  selectedId,
+  selectedIds = [],
+  additive = false,
   onRegion,
 }: {
   sourceId: string;
   page: number;
   regions?: Region[];
-  selectedId?: string;
-  onRegion?: (region: Region) => void;
+  selectedIds?: string[];
+  additive?: boolean;
+  onRegion?: (region: Region, additive: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null),
     layerRef = useRef<HTMLDivElement>(null),
     containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<Region | null>(null);
-  const selected = regions.find((r) => r.id === selectedId);
+  const selected = regions.filter((r) => selectedIds.includes(r.id));
   const visibleRegions = regions.filter((r) => r.page === page);
   useEffect(() => {
     setHovered(null);
@@ -151,6 +153,14 @@ export default function PdfReader({
       ) : (
         <div
           className="pdf-page"
+          onMouseDown={(e) => {
+            if (additive || e.metaKey || e.ctrlKey || e.shiftKey)
+              e.preventDefault();
+          }}
+          onMouseUp={(e) => {
+            if (additive || e.metaKey || e.ctrlKey || e.shiftKey)
+              e.stopPropagation();
+          }}
           onPointerMove={(e) => {
             const b = e.currentTarget.getBoundingClientRect();
             setHovered(
@@ -163,7 +173,9 @@ export default function PdfReader({
           }}
           onPointerLeave={() => setHovered(null)}
           onClick={(e) => {
-            if (!window.getSelection()?.isCollapsed) return;
+            const adding = additive || e.metaKey || e.ctrlKey || e.shiftKey;
+            if (!adding && !window.getSelection()?.isCollapsed) return;
+            if (adding) window.getSelection()?.removeAllRanges();
             const b = e.currentTarget.getBoundingClientRect();
             const hits = hitRegions(
               visibleRegions,
@@ -171,22 +183,34 @@ export default function PdfReader({
               (e.clientY - b.top) / b.height,
             );
             const region = e.altKey
-              ? hits.find((r) => r.id !== selectedId) || hits[0]
+              ? hits.find((r) => !selectedIds.includes(r.id)) || hits[0]
               : hits[0];
-            if (region) onRegion?.(region);
+            if (region)
+              onRegion?.(
+                region,
+                additive || e.metaKey || e.ctrlKey || e.shiftKey,
+              );
           }}
         >
           <canvas ref={canvasRef} />
           <div ref={layerRef} className="textLayer" />
-          {selected?.page === page && (
-            <div
-              className="region-outline pinned"
-              style={boxStyle(selected.box)}
-            >
-              <span>{selected.kind}</span>
-            </div>
-          )}
-          {hovered && hovered.id !== selectedId && (
+          {selected
+            .filter((r) => r.page === page)
+            .map((region) => (
+              <div
+                key={region.id}
+                className="region-outline pinned"
+                style={boxStyle(region.box)}
+              >
+                <span>
+                  {region.kind}
+                  {region.lineCount && region.lineCount > 1
+                    ? ` · ${region.lineCount} rows`
+                    : ""}
+                </span>
+              </div>
+            ))}
+          {hovered && !selectedIds.includes(hovered.id) && (
             <div className="region-outline hover" style={boxStyle(hovered.box)}>
               <span>{hovered.kind} · click to select</span>
             </div>

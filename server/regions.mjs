@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
-export const REGION_VERSION = "regions-2";
+export const REGION_VERSION = "regions-3";
 export const hash = (value) =>
   createHash("sha256")
     .update(
@@ -52,6 +52,7 @@ export function nativeBlocks(items, viewport, transform) {
       return {
         text: i.str,
         size: h / viewport.height,
+        baseline: t[5] / viewport.height,
         box: [
           clamp(Math.min(...corners.map((p) => p[0])) / viewport.width),
           clamp(Math.min(...corners.map((p) => p[1])) / viewport.height),
@@ -76,6 +77,12 @@ export function nativeBlocks(items, viewport, transform) {
   const cuts = Array.from({ length: 17 }, (_, i) => 0.42 + i * 0.01)
     .map((cut) => ({
       cut,
+      fragmentCrossing: pieces.filter(
+        (p) =>
+          p.box[2] - p.box[0] < 0.7 &&
+          p.box[0] < cut - 0.002 &&
+          p.box[2] > cut + 0.002,
+      ).length,
       crossing: body.filter(
         (p) => p.box[0] < cut - 0.002 && p.box[2] > cut + 0.002,
       ).length,
@@ -84,15 +91,16 @@ export function nativeBlocks(items, viewport, transform) {
     }))
     .filter(
       (c) =>
-        body.length >= 12 &&
-        c.left >= 3 &&
-        c.right >= 3 &&
+        body.length >= 2 &&
+        c.left >= 1 &&
+        c.right >= 1 &&
         Math.min(c.left, c.right) >= body.length * 0.2 &&
         c.crossing <= body.length * 0.08,
     )
     .sort(
       (a, b) =>
         a.crossing - b.crossing ||
+        a.fragmentCrossing - b.fragmentCrossing ||
         Math.abs(a.cut - 0.5) - Math.abs(b.cut - 0.5),
     );
   const gutter = cuts[0]?.cut;
@@ -100,55 +108,115 @@ export function nativeBlocks(items, viewport, transform) {
     piece.column =
       gutter === undefined
         ? 0
-        : piece.box[0] < gutter && piece.box[2] > gutter
+        : piece.box[0] < gutter &&
+            piece.box[2] > gutter &&
+            piece.box[2] - piece.box[0] > 0.5
           ? "full"
           : (piece.box[0] + piece.box[2]) / 2 < gutter
             ? 0
             : 1;
   const lines = [];
-  for (const piece of pieces.sort(
-    (a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0],
+  const main = pieces.filter((p) => p.size >= median * 0.85);
+  const scripts = pieces.filter((p) => p.size < median * 0.85);
+  for (const piece of main.sort(
+    (a, b) => a.baseline - b.baseline || a.box[0] - b.box[0],
   )) {
-    const line = lines.findLast(
+    let line = lines.find(
       (l) =>
         l.column === piece.column &&
-        Math.abs(l.box[1] - piece.box[1]) <
-          Math.max(l.size, piece.size) * 0.55 &&
-        piece.box[0] - l.box[2] < 0.025 &&
-        piece.box[0] >= l.box[0] - 0.01,
+        Math.abs(l.baseline - piece.baseline) < median * 0.32,
     );
-    if (line) {
-      line.text += " " + piece.text;
-      line.box = union([line.box, piece.box]);
-      line.size = Math.max(line.size, piece.size);
-    } else lines.push({ ...piece });
+    if (!line) {
+      line = { ...piece, pieces: [] };
+      lines.push(line);
+    }
+    line.pieces.push(piece);
+    line.box = union(line.pieces.map((p) => p.box));
+    line.size = Math.max(line.size, piece.size);
   }
-  const blocks = [];
-  for (const line of lines) {
-    const kind = regionKind(line.text);
-    const heading = line.size > median * 1.25 && line.text.length < 180;
-    const prev = blocks.findLast(
-      (b) =>
-        b.column === line.column &&
-        Math.abs(b.box[0] - line.box[0]) < 0.035 &&
-        line.box[1] >= b.box[1] &&
-        line.box[1] - b.box[3] < Math.max(line.size, b.size) * 0.9,
+  for (const piece of scripts) {
+    const closest = lines
+      .filter((l) => l.column === piece.column)
+      .sort(
+        (a, b) =>
+          Math.abs(a.baseline - piece.baseline) -
+          Math.abs(b.baseline - piece.baseline),
+      )[0];
+    if (closest && Math.abs(closest.baseline - piece.baseline) < median * 1.6) {
+      closest.pieces.push(piece);
+      closest.box = union(closest.pieces.map((p) => p.box));
+    } else lines.push({ ...piece, pieces: [piece] });
+  }
+  const mathLine = (line) => {
+    if (regionKind(line.text) === "equation") return true;
+    const prose = (line.text.match(/\b[A-Za-z]{3,}\b/g) || []).filter(
+      (w) =>
+        ![
+          "min",
+          "max",
+          "argmin",
+          "argmax",
+          "sin",
+          "cos",
+          "log",
+          "exp",
+          "diag",
+          "lim",
+        ].includes(w.toLowerCase()),
     );
+    return (
+      !prose.length &&
+      /[\p{L}\p{N}]/u.test(line.text) &&
+      /^[\p{L}\p{N}\s.,;:(){}\[\]|+−\-*/^_˜~∥<>≤≥∈∀=]+$/u.test(line.text)
+    );
+  };
+  for (const line of lines) {
+    line.text = line.pieces
+      .sort((a, b) => a.box[0] - b.box[0] || a.baseline - b.baseline)
+      .map((p) => p.text)
+      .join(" ");
+    line.kind = mathLine(line) ? "equation" : regionKind(line.text);
+    line.heading =
+      line.kind === "paragraph" &&
+      line.size > median * 1.25 &&
+      line.text.length < 180;
+    if (line.heading) line.kind = "heading";
+  }
+  // Reconstruct complete visual rows before joining adjacent mathematical rows.
+  // Gaps between symbols and right-aligned equation labels do not split a row.
+  const blocks = [];
+  for (const line of lines.sort(
+    (a, b) => a.baseline - b.baseline || a.box[0] - b.box[0],
+  )) {
+    const prev = blocks.findLast((b) => b.column === line.column);
+    const gap = prev ? line.box[1] - prev.box[3] : Infinity;
     if (
       prev &&
-      kind === "paragraph" &&
+      prev.kind === "equation" &&
+      line.kind === "equation" &&
+      gap < median * 1.9 &&
+      gap >= -median * 0.6
+    ) {
+      if (!prev.children)
+        prev.children = [
+          { text: prev.text, kind: "equation", box: [...prev.box] },
+        ];
+      prev.children.push({ text: line.text, kind: "equation", box: line.box });
+      prev.text += "\n" + line.text;
+      prev.box = union([prev.box, line.box]);
+    } else if (
+      prev &&
       prev.kind === "paragraph" &&
-      !heading &&
-      !prev.heading
+      line.kind === "paragraph" &&
+      !prev.heading &&
+      !line.heading &&
+      gap < median * 0.85 &&
+      gap >= -median * 0.5 &&
+      Math.abs(prev.box[0] - line.box[0]) < 0.035
     ) {
       prev.text += "\n" + line.text;
       prev.box = union([prev.box, line.box]);
-    } else
-      blocks.push({
-        ...line,
-        kind: heading && kind === "paragraph" ? "heading" : kind,
-        heading,
-      });
+    } else blocks.push({ ...line });
   }
   const separators = blocks
     .filter((b) => b.column === "full")
@@ -230,6 +298,23 @@ export function makeLayout(sourceId, contentHash, pages, extractor = "native") {
       }
     }
     regions.push(...children);
+    blocks.forEach((block, i) => {
+      if (!block.children?.length) return;
+      const parent = children[i];
+      parent.role = "equation-block";
+      parent.lineCount = block.children.length;
+      for (const [j, row] of block.children.entries())
+        regions.push({
+          ...parent,
+          id: `${parent.id}:line${j + 1}`,
+          parentId: parent.id,
+          box: row.box,
+          text: row.text,
+          role: "equation-line",
+          lineCount: 1,
+          order: parent.order + (j + 1) / 1000,
+        });
+    });
     if (!children.length)
       warnings.push(
         `Page ${page} has no extracted regions. Use PaddleOCR for image-only pages.`,

@@ -28,8 +28,34 @@ import {
 import { askTutor, recallPrompt } from "./tutor.mjs";
 
 const string = z.string().trim().min(1).max(100_000);
+const regionSelectionSchema = z.object({
+  regionId: z.string().max(250),
+  page: z.number().int().positive(),
+  quote: z.string().max(10000).default(""),
+  section: z.string().max(500).optional(),
+  revision: z.string().max(100).optional(),
+  box: z
+    .tuple([
+      z.number().min(0).max(1),
+      z.number().min(0).max(1),
+      z.number().min(0).max(1),
+      z.number().min(0).max(1),
+    ])
+    .optional(),
+});
+const selectedAnchors = (anchor) =>
+  anchor?.regions?.length ? anchor.regions : anchor?.regionId ? [anchor] : [];
 const anchorSchema = z.object({
   sourceId: z.string(),
+  regions: z
+    .array(regionSelectionSchema)
+    .min(1)
+    .max(64)
+    .refine(
+      (items) => new Set(items.map((r) => r.regionId)).size === items.length,
+      "Select each region only once.",
+    )
+    .optional(),
   page: z.number().int().positive(),
   quote: z.string().max(10000).default(""),
   section: z.string().max(500).optional(),
@@ -308,6 +334,7 @@ export async function createApp({
     getModels: () => models,
     ...(intakeExtractors ? { extractors: intakeExtractors } : {}),
   });
+  app.locals.closeIntake = () => intake.close();
   function layoutFor(sourceId, revision) {
     const current = store.get("documentLayout", `layout:${sourceId}`);
     return !revision || current?.revision === revision
@@ -362,13 +389,14 @@ export async function createApp({
       (anchor.sourceId !== source.id || anchor.page > source.pages.length)
     )
       throw fail("The selected source position is invalid.");
-    if (anchor?.regionId) {
-      const layout = layoutFor(source.id, anchor.revision);
-      const region = layout?.regions.find((r) => r.id === anchor.regionId);
+    for (const selection of selectedAnchors(anchor)) {
+      const layout = layoutFor(source.id, selection.revision);
+      const region = layout?.regions.find((r) => r.id === selection.regionId);
       if (
         !region ||
-        region.page !== anchor.page ||
-        (anchor.revision && anchor.revision !== layout.revision)
+        region.page !== selection.page ||
+        selection.page > source.pages.length ||
+        (selection.revision && selection.revision !== layout.revision)
       )
         throw fail("This region changed. Select it again in the PDF.");
     }
@@ -879,7 +907,7 @@ export async function createApp({
       createdAt: new Date().toISOString(),
     });
     const currentNotes =
-      input.anchor?.regionId && vault.root
+      selectedAnchors(input.anchor).length && vault.root
         ? (await scanVault(vault.root)).notes
         : vault.notes;
     const retrieved = await retrieval.retrieve(
@@ -902,23 +930,29 @@ export async function createApp({
           })
         : null;
     let chunkContext = [];
-    let selectedRegion = null;
-    if (input.anchor?.regionId) {
+    const selectedRegions = [];
+    if (selectedAnchors(input.anchor).length) {
       await sourcePdf(source);
-      const current = currentNotes;
-      const layout = layoutFor(source.id, input.anchor.revision);
-      selectedRegion = layout?.regions.find(
-        (r) => r.id === input.anchor.regionId,
-      );
-      const ids = new Set([selectedRegion?.id, selectedRegion?.parentId]);
-      chunkContext = intake
-        .contexts(source.id, "", current, input.anchor.revision)
-        .filter((c) => ids.has(c.regionId) && !c.stale)
-        .slice(0, 3);
+      const seen = new Set();
+      for (const selection of selectedAnchors(input.anchor)) {
+        const layout = layoutFor(source.id, selection.revision);
+        const region = layout.regions.find((r) => r.id === selection.regionId);
+        selectedRegions.push(region);
+        const ids = new Set([region.id, region.parentId]);
+        for (const context of intake
+          .contexts(source.id, "", currentNotes, selection.revision)
+          .filter((c) => ids.has(c.regionId) && !c.stale)) {
+          if (!seen.has(context.regionId)) {
+            seen.add(context.regionId);
+            chunkContext.push(context);
+          }
+        }
+      }
+      chunkContext = chunkContext.slice(0, 3);
     }
     const answer = await askTutor({
       chunkContext,
-      region: selectedRegion,
+      regions: selectedRegions,
       question: input.text,
       source,
       anchor: input.anchor || { sourceId: source.id, page: session.page },

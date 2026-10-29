@@ -6,7 +6,11 @@ PDF.js renders the original at the current width; normalized boxes scale with th
 
 ## Reading interaction
 
-Hover previews the smallest region under the pointer, and clicking pins it.
+Hover previews a complete equation block or the smallest other region under the pointer, and clicking pins it.
+Cmd/Ctrl-click or Shift-click toggles additional regions, and the Multi-select toolbar toggle provides the same behavior with ordinary clicks.
+Selections can span pages; separate source IDs, extraction revisions, page geometry, and text are retained for every selected region.
+Native equation extraction groups glyphs by their baseline, attaches subscripts and superscripts, keeps right-aligned equation labels, and joins adjacent mathematical rows into one block.
+Alt-click can drill into a block to select an individual row.
 Expand follows the region's `parentId`; numbered definition and theorem groups can contain paragraphs and displayed equations.
 The region menu supports keyboard selection, and Alt-click can select an enclosing overlapping region.
 Add note focuses the existing notebook capture field; Ask about this focuses the research tutor.
@@ -87,3 +91,7 @@ That small run verifies the integration, not the quality or throughput of docume
 
 The initial real PaddleOCR validation parsed the controlled two-page fixture into nine regions, including one recognized equation, without warnings.
 Its first run took approximately 226 seconds including initial model downloads; it is not a steady-state performance measurement.
+
+A cached repeat of the two-page PaddleOCR fixture completed in approximately 27 seconds with the same nine regions and one equation.
+The adapter uses `predict_iter()` so page progress is available during longer documents.
+Nearby prose is included when finding note matches for symbol-only equations, and spatially adjacent regions remain candidates even without shared words.

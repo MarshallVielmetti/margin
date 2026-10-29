@@ -2,10 +2,19 @@ export type View =
   "desk" | "library" | "vault" | "history" | "promotions" | "settings";
 export interface Anchor {
   sourceId: string;
+  regions?: RegionAnchor[];
   page: number;
   quote: string;
   section?: string;
   regionId?: string;
+  revision?: string;
+  box?: [number, number, number, number];
+}
+export interface RegionAnchor {
+  regionId: string;
+  page: number;
+  quote: string;
+  section?: string;
   revision?: string;
   box?: [number, number, number, number];
 }
@@ -193,6 +202,9 @@ export interface Region {
   parentId: string | null;
   order: number;
   origin: string;
+  role?: "equation-line" | "equation-block";
+  lineCount?: number;
+  revision?: string;
   latex?: string;
   heuristic?: boolean;
 }

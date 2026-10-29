@@ -47,9 +47,13 @@ if (process.argv.includes("--dev")) {
 server.listen(port, "127.0.0.1", () =>
   console.log(`Margin is ready at http://127.0.0.1:${port}`),
 );
+let closing = false;
 async function close() {
+  if (closing) return;
+  closing = true;
   server.close();
   await app.locals.agentHarness?.stop();
+  await app.locals.closeIntake?.();
   await vite?.close();
   store.close();
   process.exit(0);

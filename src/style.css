@@ -3435,3 +3435,6 @@ h1 {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
 }
+.selected-region-list { display:flex; flex-wrap:wrap; gap:6px; padding:8px 0; }
+.selected-region-list > span { display:inline-flex; align-items:center; padding:3px 5px; border:1px solid #cad6bd; border-radius:5px; background:#f2f6ec; }
+.region-selection button[aria-pressed="true"] { background:#dce7d0; border-radius:4px; padding:4px 7px; color:#355026; }

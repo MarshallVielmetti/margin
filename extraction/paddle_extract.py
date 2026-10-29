@@ -19,6 +19,13 @@ def normalize_result(result):
     }
 
 
+def parse_pages(pipeline, pdf):
+    # predict() eagerly processes every page in PaddleOCR 3.7.
+    # Iteration exposes each completed page immediately for useful progress.
+    for result in pipeline.predict_iter(input=pdf):
+        yield normalize_result(result)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("pdf")
@@ -33,8 +40,8 @@ def main():
         use_formula_recognition=True,
     )
     pages = []
-    for index, result in enumerate(pipeline.predict(input=args.pdf)):
-        pages.append(normalize_result(result))
+    for index, page in enumerate(parse_pages(pipeline, args.pdf)):
+        pages.append(page)
         print(f"Parsed page {index + 1}", flush=True)
     Path(args.output).write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
 

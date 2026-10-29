@@ -220,3 +220,57 @@ test("retrieval-only intake yields to cancellation between chunks", async (t) =>
   assert.equal(result.status, "cancelled");
   assert.ok(result.done < result.total);
 });
+
+test("server shutdown aborts active intake and awaits its terminal state", async (t) => {
+  let entered;
+  const started = new Promise((resolve) => (entered = resolve));
+  const f = fixture(t, async (_p, _b, _t, signal) => {
+    entered();
+    await new Promise((_resolve, reject) =>
+      signal.addEventListener("abort", () => reject(new Error("aborted")), {
+        once: true,
+      }),
+    );
+  });
+  const job = f.intake.start("s", { model: "local" });
+  await started;
+  try {
+    await f.intake.close();
+    assert.equal(f.store.get("intakeJob", job.id).status, "cancelled");
+    assert.equal(f.intake.active.size, 0);
+  } finally {
+    f.intake.cancel("s");
+  }
+});
+
+test("symbol-only equations retain nearby prose and region connections", async () => {
+  const { regionCandidates, chunkRetrievalQuery } =
+    await import("../server/intake.mjs");
+  const equation = {
+    id: "e",
+    page: 1,
+    kind: "equation",
+    text: "c(p) ≤ 0",
+    box: [0.1, 0.2, 0.3, 0.25],
+    parentId: "p",
+    order: 2,
+  };
+  const prose = {
+    id: "t",
+    page: 1,
+    kind: "paragraph",
+    text: "Collision avoidance constrains the joint predicted positions of agents.",
+    box: [0.1, 0.1, 0.48, 0.17],
+    parentId: "p",
+    order: 1,
+  };
+  assert.ok(
+    regionCandidates(equation, [equation, prose]).some(
+      (r) => r.regionId === "t",
+    ),
+  );
+  assert.match(
+    chunkRetrievalQuery(equation, [equation, prose]),
+    /Collision avoidance/,
+  );
+});

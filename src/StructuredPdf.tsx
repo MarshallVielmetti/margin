@@ -11,6 +11,11 @@ import type {
 import { api, obsidianUrl } from "./api";
 import PdfReader from "./PdfReader";
 import { Markdown } from "./Markdown";
+import {
+  toggleRegions,
+  selectedRegions,
+  selectionAnchor,
+} from "./region-geometry.mjs";
 
 type State = {
   layout: DocumentLayout | null;
@@ -34,6 +39,8 @@ export default function StructuredPdf({
   onNote: (path: string) => void;
   onAction: (tab: "capture" | "tutor") => void;
 }) {
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [focusedId, setFocusedId] = useState("");
   const [pollKey, setPollKey] = useState(0);
   const [state, setState] = useState<State>({ layout: null, job: null }),
     [error, setError] = useState(""),
@@ -48,25 +55,15 @@ export default function StructuredPdf({
     !!state.job &&
     ["queued", "running", "cancelling"].includes(state.job.status);
   const regions = state.layout?.regions || [];
+  const selections = selectedRegions(anchor, regions);
   const selected =
-    regions.find((r) => r.id === anchor.regionId && r.page === page) ||
-    (anchor.regionId && anchor.box && anchor.page === page
-      ? ({
-          id: anchor.regionId,
-          sourceId,
-          page,
-          kind: anchor.section?.split(" · ")[0]?.toLowerCase() || "region",
-          text: anchor.quote,
-          box: anchor.box,
-          parentId: null,
-          order: 0,
-          origin: "saved anchor",
-        } as Region)
-      : undefined);
-  const selectableRegions =
-    selected && !regions.some((r) => r.id === selected.id)
-      ? [...regions, selected]
-      : regions;
+    selections.find((r) => r.id === focusedId) ||
+    selections.find((r) => r.page === page) ||
+    selections.at(-1);
+  const selectableRegions = [
+    ...regions,
+    ...selections.filter((s) => !regions.some((r) => r.id === s.id)),
+  ];
   const parent = regions.find((r) => r.id === selected?.parentId);
   const localModels = config.models.filter(
     (m) => !m.cloud && m.capabilities.includes("completion"),
@@ -126,7 +123,7 @@ export default function StructuredPdf({
     let live = true;
     setLoadingContext(true);
     api<{ contexts: ChunkContext[] }>(
-      `/sources/${sourceId}/chunks?regionId=${encodeURIComponent(selected.id)}&revision=${encodeURIComponent(anchor.revision || "")}`,
+      `/sources/${sourceId}/chunks?regionId=${encodeURIComponent(selected.id)}&revision=${encodeURIComponent(selected.revision || state.layout?.revision || "")}`,
     )
       .then((r) => {
         if (live) setContexts(r.contexts);
@@ -143,23 +140,33 @@ export default function StructuredPdf({
   }, [
     sourceId,
     selected?.id,
+    selected?.revision,
     showContext,
     state.job?.status,
     state.layout?.revision,
   ]);
-  function choose(region: Region) {
-    onAnchor({
-      sourceId,
-      page: region.page,
-      quote: region.text.slice(0, 10000),
-      section: `${region.kind[0].toUpperCase() + region.kind.slice(1)} · page ${region.page}`,
-      regionId: region.id,
-      revision:
-        region.origin === "saved anchor"
-          ? anchor.revision
-          : state.layout?.revision,
-      box: region.box,
-    });
+  function choose(region: Region, additive = multiSelect) {
+    const next = toggleRegions(selections, region, additive, selectableRegions);
+    if (next.length > 64) {
+      setError("Choose up to 64 regions in one selection.");
+      return;
+    }
+    setFocusedId(
+      next.some((r) => r.id === region.id) ? region.id : next.at(-1)?.id || "",
+    );
+    onAnchor(
+      selectionAnchor(sourceId, region.page, next, state.layout?.revision),
+    );
+  }
+  function remove(id: string) {
+    onAnchor(
+      selectionAnchor(
+        sourceId,
+        page,
+        selections.filter((r) => r.id !== id),
+        state.layout?.revision,
+      ),
+    );
   }
   async function start() {
     setBusy(true);
@@ -305,10 +312,23 @@ export default function StructuredPdf({
         sourceId={sourceId}
         page={page}
         regions={selectableRegions}
-        selectedId={anchor.regionId}
+        selectedIds={selections.map((r) => r.id)}
+        additive={multiSelect}
         onRegion={choose}
       />
       <div className="region-selection">
+        <button
+          className={`text-button ${multiSelect ? "active" : ""}`}
+          aria-pressed={multiSelect}
+          onClick={() => setMultiSelect(!multiSelect)}
+        >
+          Multi-select {multiSelect ? "on" : "off"}
+        </button>
+        <span className="region-hint">
+          {selections.length
+            ? `${selections.length} selected`
+            : "Cmd/Ctrl or Shift-click to add regions"}
+        </span>
         <label className="sr-only" htmlFor={`region-${sourceId}`}>
           Select a PDF region
         </label>
@@ -333,12 +353,12 @@ export default function StructuredPdf({
               </option>
             ))}
         </select>
-        {selected && (
+        {selections.length > 0 && (
           <>
             {parent && (
               <button
                 className="text-button"
-                onClick={() => choose(parent)}
+                onClick={() => choose(parent, true)}
                 title="Select enclosing region"
               >
                 <Maximize2 size={13} />
@@ -368,6 +388,31 @@ export default function StructuredPdf({
           </>
         )}
       </div>
+      {selections.length > 1 && (
+        <div className="selected-region-list" aria-label="Selected regions">
+          {selections.map((r) => (
+            <span key={r.id}>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setFocusedId(r.id);
+                  onAnchor({ ...anchor, page: r.page });
+                }}
+              >
+                Page {r.page} · {r.kind}
+                {r.lineCount && r.lineCount > 1 ? ` (${r.lineCount} rows)` : ""}
+              </button>
+              <button
+                className="icon-button"
+                aria-label={`Remove ${r.kind} on page ${r.page}`}
+                onClick={() => remove(r.id)}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {selected?.heuristic && (
         <p className="region-hint">
           Grouping inferred from headings and nearby blocks; adjust the

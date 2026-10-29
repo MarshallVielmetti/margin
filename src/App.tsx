@@ -1106,7 +1106,13 @@ function Reader({
               onAnchor({
                 sourceId: source.id,
                 page: session.page - 1,
-                quote: "",
+                ...(anchor.regions?.length
+                  ? {
+                      regions: anchor.regions,
+                      quote: anchor.quote,
+                      section: anchor.section,
+                    }
+                  : { quote: "" }),
               })
             }
           >
@@ -1123,7 +1129,13 @@ function Reader({
               onAnchor({
                 sourceId: source.id,
                 page: session.page + 1,
-                quote: "",
+                ...(anchor.regions?.length
+                  ? {
+                      regions: anchor.regions,
+                      quote: anchor.quote,
+                      section: anchor.section,
+                    }
+                  : { quote: "" }),
               })
             }
           >

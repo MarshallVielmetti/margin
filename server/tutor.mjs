@@ -25,19 +25,32 @@ export async function askTutor({
   researchQuestion = "",
   chunkContext = [],
   region = null,
+  regions = [],
 }) {
   const pageIndex = Math.max(0, (anchor?.page || 1) - 1);
+  const selected = regions.length ? regions : region ? [region] : [];
   const evidence = [
-    {
-      id: "S1",
-      title: source.title,
-      kind: source.kind,
-      page: pageIndex + 1,
-      text: (region?.text || source.pages[pageIndex] || "").slice(0, 9000),
-      ...(region
-        ? { regionId: region.id, extraction: region.origin, box: region.box }
-        : {}),
-    },
+    ...(selected.length
+      ? selected.map((r, i) => ({
+          id: `S${i + 1}`,
+          title: source.title,
+          kind: source.kind,
+          page: r.page,
+          regionId: r.id,
+          extraction: r.origin,
+          box: r.box,
+          text: r.text.slice(0, Math.floor(9000 / selected.length)),
+          truncated: r.text.length > Math.floor(9000 / selected.length),
+        }))
+      : [
+          {
+            id: "S1",
+            title: source.title,
+            kind: source.kind,
+            page: pageIndex + 1,
+            text: (source.pages[pageIndex] || "").slice(0, 9000),
+          },
+        ]),
     ...chunkContext.map((c, i) => ({
       id: `C${i + 1}`,
       title: `${source.title} · saved chunk context`,
@@ -79,7 +92,13 @@ export async function askTutor({
   const instructions = `${tutorInstructions}\n${actions[mode] || actions.discuss}`;
   const content = JSON.stringify({
     evidence,
-    selection: anchor,
+    selection: anchor?.regions?.length
+      ? {
+          ...anchor,
+          quote: anchor.quote?.slice(0, 2000),
+          regions: anchor.regions.map(({ quote, ...selection }) => selection),
+        }
+      : anchor,
     contextPolicy:
       "C evidence contains saved intake artifacts. AI summaries and inferred connections are unverified proposals, not original source claims. Inspect supplied source and target passages before using them.",
     researchQuestion,
