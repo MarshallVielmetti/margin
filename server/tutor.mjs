@@ -24,6 +24,7 @@ export async function askTutor({
   mode = "discuss",
   researchQuestion = "",
   chunkContext = [],
+  region = null,
 }) {
   const pageIndex = Math.max(0, (anchor?.page || 1) - 1);
   const evidence = [
@@ -32,7 +33,10 @@ export async function askTutor({
       title: source.title,
       kind: source.kind,
       page: pageIndex + 1,
-      text: (source.pages[pageIndex] || "").slice(0, 9000),
+      text: (region?.text || source.pages[pageIndex] || "").slice(0, 9000),
+      ...(region
+        ? { regionId: region.id, extraction: region.origin, box: region.box }
+        : {}),
     },
     ...chunkContext.map((c, i) => ({
       id: `C${i + 1}`,

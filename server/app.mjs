@@ -344,6 +344,7 @@ export async function createApp({
       schemaVersion: 1,
       sourceId: source.id,
       ...intake.state(source.id),
+      layout: layoutFor(source.id, String(req.query.revision || "")),
       contexts,
     });
   });
@@ -826,11 +827,12 @@ export async function createApp({
           })
         : null;
     let chunkContext = [];
+    let selectedRegion = null;
     if (input.anchor?.regionId) {
       await sourcePdf(source);
       const current = currentNotes;
       const layout = layoutFor(source.id, input.anchor.revision);
-      const selectedRegion = layout?.regions.find(
+      selectedRegion = layout?.regions.find(
         (r) => r.id === input.anchor.regionId,
       );
       const ids = new Set([selectedRegion?.id, selectedRegion?.parentId]);
@@ -841,6 +843,7 @@ export async function createApp({
     }
     const answer = await askTutor({
       chunkContext,
+      region: selectedRegion,
       question: input.text,
       source,
       anchor: input.anchor || { sourceId: source.id, page: session.page },

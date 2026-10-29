@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
-export const REGION_VERSION = "regions-1";
+export const REGION_VERSION = "regions-2";
 export const hash = (value) =>
   createHash("sha256")
     .update(
@@ -19,14 +19,14 @@ const union = (boxes) => [
   Math.max(...boxes.map((b) => b[3])),
 ];
 const environment =
-  /^(Definition|Theorem|Lemma|Proposition|Corollary|Assumption|Remark|Proof)\b[\s\d.:(]/i;
+  /^(Definition|Theorem|Lemma|Proposition|Corollary|Assumption|Remark|Proof)\b(?:\s+\d+(?:\.\d+)*[A-Za-z]?(?:\s*[:.(]|\s*$)|\s*[:.(])/i;
 export function regionKind(text) {
   const env = text.match(environment);
   if (env) return env[1].toLowerCase();
   if (
     text.length < 260 &&
     /[=≤≥∑∫∀∈≔]|\\(?:frac|sum|int|begin)\b/.test(text) &&
-    text.split(/\s+/).filter((w) => /^[a-zA-Z]{4,}$/.test(w)).length < 7
+    (text.match(/\b[A-Za-z]{3,}\b/g) || []).length < 3
   )
     return "equation";
   return "paragraph";
@@ -61,15 +61,60 @@ export function nativeBlocks(items, viewport, transform) {
       };
     })
     .filter((p) => p.box[2] > p.box[0] && p.box[3] > p.box[1]);
+  const median =
+    pieces.map((p) => p.size).sort((a, b) => a - b)[
+      Math.floor(pieces.length / 2)
+    ] || 0.015;
+  // A persistent low-occupancy vertical band identifies a narrow two-column gutter.
+  // Classify fragments before line grouping so mathematical tokens cannot bridge it.
+  const body = pieces.filter(
+    (p) =>
+      p.box[2] - p.box[0] > 0.12 &&
+      p.box[2] - p.box[0] < 0.7 &&
+      p.size <= median * 1.2,
+  );
+  const cuts = Array.from({ length: 17 }, (_, i) => 0.42 + i * 0.01)
+    .map((cut) => ({
+      cut,
+      crossing: body.filter(
+        (p) => p.box[0] < cut - 0.002 && p.box[2] > cut + 0.002,
+      ).length,
+      left: body.filter((p) => p.box[2] <= cut + 0.002).length,
+      right: body.filter((p) => p.box[0] >= cut - 0.002).length,
+    }))
+    .filter(
+      (c) =>
+        body.length >= 12 &&
+        c.left >= 3 &&
+        c.right >= 3 &&
+        Math.min(c.left, c.right) >= body.length * 0.2 &&
+        c.crossing <= body.length * 0.08,
+    )
+    .sort(
+      (a, b) =>
+        a.crossing - b.crossing ||
+        Math.abs(a.cut - 0.5) - Math.abs(b.cut - 0.5),
+    );
+  const gutter = cuts[0]?.cut;
+  for (const piece of pieces)
+    piece.column =
+      gutter === undefined
+        ? 0
+        : piece.box[0] < gutter && piece.box[2] > gutter
+          ? "full"
+          : (piece.box[0] + piece.box[2]) / 2 < gutter
+            ? 0
+            : 1;
   const lines = [];
   for (const piece of pieces.sort(
     (a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0],
   )) {
     const line = lines.findLast(
       (l) =>
+        l.column === piece.column &&
         Math.abs(l.box[1] - piece.box[1]) <
           Math.max(l.size, piece.size) * 0.55 &&
-        piece.box[0] - l.box[2] < 0.045 &&
+        piece.box[0] - l.box[2] < 0.025 &&
         piece.box[0] >= l.box[0] - 0.01,
     );
     if (line) {
@@ -78,16 +123,13 @@ export function nativeBlocks(items, viewport, transform) {
       line.size = Math.max(line.size, piece.size);
     } else lines.push({ ...piece });
   }
-  const median =
-    pieces.map((p) => p.size).sort((a, b) => a - b)[
-      Math.floor(pieces.length / 2)
-    ] || 0.015;
   const blocks = [];
   for (const line of lines) {
     const kind = regionKind(line.text);
     const heading = line.size > median * 1.25 && line.text.length < 180;
     const prev = blocks.findLast(
       (b) =>
+        b.column === line.column &&
         Math.abs(b.box[0] - line.box[0]) < 0.035 &&
         line.box[1] >= b.box[1] &&
         line.box[1] - b.box[3] < Math.max(line.size, b.size) * 0.9,
@@ -108,24 +150,22 @@ export function nativeBlocks(items, viewport, transform) {
         heading,
       });
   }
-  return blocks.sort((a, b) => {
-    // Prefer column order for non-overlapping columns; headings retain vertical order.
-    if (
-      a.box[2] < 0.56 &&
-      b.box[0] > 0.44 &&
-      a.box[3] > b.box[1] &&
-      b.box[3] > a.box[1]
-    )
-      return -1;
-    if (
-      b.box[2] < 0.56 &&
-      a.box[0] > 0.44 &&
-      a.box[3] > b.box[1] &&
-      b.box[3] > a.box[1]
-    )
-      return 1;
-    return a.box[1] - b.box[1] || a.box[0] - b.box[0];
-  });
+  const separators = blocks
+    .filter((b) => b.column === "full")
+    .sort((a, b) => a.box[1] - b.box[1]);
+  const band = (b) =>
+    b.column === "full"
+      ? separators.indexOf(b) * 2 + 1
+      : separators.filter((s) => s.box[1] < b.box[1]).length * 2;
+  return blocks.sort(
+    (a, b) =>
+      band(a) - band(b) ||
+      (typeof a.column === "number" && typeof b.column === "number"
+        ? a.column - b.column
+        : 0) ||
+      a.box[1] - b.box[1] ||
+      a.box[0] - b.box[0],
+  );
 }
 
 export function makeLayout(sourceId, contentHash, pages, extractor = "native") {

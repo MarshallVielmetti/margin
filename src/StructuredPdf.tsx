@@ -12,7 +12,11 @@ import { api, obsidianUrl } from "./api";
 import PdfReader from "./PdfReader";
 import { Markdown } from "./Markdown";
 
-type State = { layout: DocumentLayout | null; job: IntakeJob | null };
+type State = {
+  layout: DocumentLayout | null;
+  job: IntakeJob | null;
+  needsIntake?: boolean;
+};
 export default function StructuredPdf({
   sourceId,
   page,
@@ -72,17 +76,29 @@ export default function StructuredPdf({
       timer: ReturnType<typeof setTimeout>;
     setContexts([]);
     setError("");
+    let first = true;
     async function poll() {
       let stateAtEnd: State | undefined;
       try {
         let next = await api<State>(`/sources/${sourceId}/regions`);
         if (disposed) return;
-        if (!next.layout && !next.job) {
+        if (
+          (!next.layout && !next.job) ||
+          (next.needsIntake &&
+            !["queued", "running", "cancelling"].includes(
+              next.job?.status || "",
+            ))
+        ) {
           await api(`/sources/${sourceId}/intake`, {});
           next = await api<State>(`/sources/${sourceId}/regions`);
         }
         if (disposed) return;
         stateAtEnd = next;
+        if (first && next.job) {
+          setExtractor(next.job.extractor);
+          setModel(next.job.model || "");
+        }
+        first = false;
         setState(next);
       } catch (e) {
         if (!disposed) setError((e as Error).message);
@@ -138,7 +154,10 @@ export default function StructuredPdf({
       quote: region.text.slice(0, 10000),
       section: `${region.kind[0].toUpperCase() + region.kind.slice(1)} · page ${region.page}`,
       regionId: region.id,
-      revision: state.layout?.revision,
+      revision:
+        region.origin === "saved anchor"
+          ? anchor.revision
+          : state.layout?.revision,
       box: region.box,
     });
   }
@@ -304,7 +323,10 @@ export default function StructuredPdf({
         >
           <option value="">Hover a region, then click to select</option>
           {selectableRegions
-            .filter((r) => r.page === page && r.kind !== "page")
+            .filter(
+              (r) =>
+                r.page === page && (r.kind !== "page" || r.id === selected?.id),
+            )
             .map((r) => (
               <option key={r.id} value={r.id}>
                 {r.kind} · {r.text.slice(0, 75) || "Visual region"}

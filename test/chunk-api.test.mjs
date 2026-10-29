@@ -89,10 +89,7 @@ test("region API persists anchored notes, exports bundles, and supplies fresh in
     title: "Fixed point paper",
     kind: "pdf",
     file: "fixture.pdf",
-    pages: [
-      "Definition 1. A contraction shrinks distances.",
-      "Theorem 2. Existence of a fixed point.",
-    ],
+    pages: ["", "Theorem 2. Existence of a fixed point."],
   });
   const session = await call("/sessions", {
     sourceId: source.id,
@@ -138,6 +135,11 @@ test("region API persists anchored notes, exports bundles, and supplies fresh in
     anchor,
   });
   assert.ok(answer.evidence.some((e) => e.id === "C1"));
+  assert.match(
+    answer.evidence.find((e) => e.id === "S1").text,
+    /contraction/i,
+    "recognized region content must be available even when the original text layer is empty",
+  );
   assert.match(submitted.messages[1].content, /saved chunk context/);
   await writeFile(noteFile, "# Contraction\nCompletely revised content.");
   const stale = await call(
