@@ -111,3 +111,57 @@ test("native geometry does not join text across a column gutter", () => {
   assert.equal(result.length, 2);
   assert.equal(result[0].text, "Left column");
 });
+
+test("a narrow academic-paper gutter must still separate columns", () => {
+  const items = [];
+  for (let row = 0; row < 12; row++) {
+    items.push({
+      str: `Left column paragraph ${row}`,
+      width: 245,
+      transform: [10, 0, 0, 10, 40, 700 - row * 16],
+    });
+    items.push({
+      str: `Right column paragraph ${row}`,
+      width: 245,
+      transform: [10, 0, 0, 10, 305, 700 - row * 16],
+    });
+  }
+  const multiply = (a, b) => [
+    a[0] * b[0],
+    0,
+    0,
+    a[3] * b[3],
+    a[0] * b[4] + a[4],
+    a[3] * b[5] + a[5],
+  ];
+  const result = nativeBlocks(
+    items,
+    { width: 595, height: 792, scale: 1, transform: [1, 0, 0, -1, 0, 792] },
+    multiply,
+  );
+  assert.ok(
+    result.every(
+      (b) =>
+        !(b.text.includes("Left column") && b.text.includes("Right column")),
+    ),
+  );
+});
+
+test("references to definitions and ordinary mathematical prose are not environment headings or equations", async () => {
+  const { regionKind } = await import("../server/regions.mjs");
+  assert.equal(
+    regionKind(
+      "Definition 1 is only a requirement for constructing contracts.",
+    ),
+    "paragraph",
+  );
+  assert.equal(
+    regionKind("For each agent i ∈ M, let the horizon be N."),
+    "paragraph",
+  );
+  assert.equal(
+    regionKind("Definition 2 (Connectivity contracts): A family of sets"),
+    "definition",
+  );
+  assert.equal(regionKind("d(Tx,Ty) <= q d(x,y), q < 1"), "equation");
+});

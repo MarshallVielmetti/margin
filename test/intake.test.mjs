@@ -200,3 +200,23 @@ test("unfinished jobs are marked interrupted after restart", (t) => {
   new Intake({ store: f.store });
   assert.equal(f.store.get("intakeJob", "old").status, "interrupted");
 });
+
+test("retrieval-only intake yields to cancellation between chunks", async (t) => {
+  const f = fixture(t);
+  f.intake.extractors.native = async () =>
+    makeLayout("s", "many", [
+      Array.from({ length: 400 }, (_, i) => ({
+        text: `Unique region ${i} with contraction evidence.`,
+        kind: "paragraph",
+        box: [0.1, 0.1, 0.5, 0.2],
+      })),
+    ]);
+  let reads = 0;
+  f.intake.retrieval.retrieve = async () => {
+    if (++reads === 1) setTimeout(() => f.intake.cancel("s"), 0);
+    return { notes: [] };
+  };
+  const result = await finish(f, f.intake.start("s"));
+  assert.equal(result.status, "cancelled");
+  assert.ok(result.done < result.total);
+});

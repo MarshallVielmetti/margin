@@ -120,7 +120,7 @@ npm test
 npm run build
 ```
 
-43 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
+46 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
 Live validation opened the existing 10-page Tsitsiklis PDF, retrieved a cited `gemma4:12b` answer, and built the full semantic index.
 Browser verification confirmed the note deep link opens the PDF and exposes the local tutor controls.
 The updated Obsidian plugin must be reloaded before its new command appears.

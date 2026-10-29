@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { hash, extractNative } from "./regions.mjs";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+import { hash, extractNative, REGION_VERSION } from "./regions.mjs";
 import { extractPaddle } from "./paddle.mjs";
 
 export const INTAKE_VERSION = "intake-1";
@@ -152,7 +153,9 @@ export class Intake {
         });
   }
   state(sourceId) {
+    const current = this.store.get("documentLayout", `layout:${sourceId}`);
     return {
+      needsIntake: !!current && current.version !== REGION_VERSION,
       layout: this.store.get("documentLayout", `layout:${sourceId}`) || null,
       job:
         this.store.list("intakeJob").find((j) => j.sourceId === sourceId) ||
@@ -219,7 +222,12 @@ export class Intake {
       const file = await this.getFile(source);
       signal.throwIfAborted();
       let layout = this.store.get("documentLayout", `layout:${source.id}`);
-      if (!layout || layout.extractor !== job.extractor || force) {
+      if (
+        !layout ||
+        layout.extractor !== job.extractor ||
+        layout.version !== REGION_VERSION ||
+        force
+      ) {
         layout = await this.extractors[job.extractor](
           source.id,
           file,
@@ -256,6 +264,7 @@ export class Intake {
         message: "Finding related notes and region context",
       });
       for (const region of regions) {
+        await yieldToEventLoop();
         signal.throwIfAborted();
         const key = hash([
           INTAKE_VERSION,
