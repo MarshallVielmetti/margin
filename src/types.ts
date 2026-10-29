@@ -1,0 +1,148 @@
+export type View =
+  "desk" | "library" | "vault" | "history" | "promotions" | "settings";
+export interface Anchor {
+  sourceId: string;
+  page: number;
+  quote: string;
+  section?: string;
+}
+export interface Workspace {
+  id: string;
+  title: string;
+  question: string;
+}
+export interface Source {
+  id: string;
+  title: string;
+  authors: string;
+  year?: number;
+  kind: "pdf" | "reading-note" | "source-excerpt";
+  pages?: string[];
+  pageCount: number;
+  hasFile: boolean;
+  notePath?: string;
+  zotero?: string;
+}
+export interface Artifact {
+  id: string;
+  sessionId: string;
+  text: string;
+  kind: string;
+  origin: "user" | "ai" | "prompt";
+  anchor?: Anchor;
+  assumptions?: string;
+  status: string;
+  createdAt: string;
+  model?: string;
+  provider?: string;
+  cloud?: boolean;
+  routing?: { model: string; reason: string; fallback: boolean };
+  retrievalWarning?: string;
+  evidence?: {
+    id: string;
+    title: string;
+    page?: number;
+    path?: string;
+    line?: number;
+    text: string;
+  }[];
+}
+export interface Session {
+  id: string;
+  workspaceId: string;
+  sourceId: string;
+  title: string;
+  page: number;
+  status: string;
+  takeaway: string;
+  nextStep?: string;
+  revisitAt?: string;
+  artifacts?: Artifact[];
+  updatedAt: string;
+  createdAt: string;
+}
+export interface Note {
+  path: string;
+  title: string;
+  type: string;
+  summary?: string;
+  excerpt?: string;
+  section?: string;
+  line?: number;
+  reason?: string;
+  content?: string;
+  body?: string;
+  aliases?: string[];
+  headings?: { title: string; line: number; level: number }[];
+  backlinks?: { path: string; title: string; section: string; line: number }[];
+}
+export interface Promotion {
+  id: string;
+  sessionId: string;
+  path: string;
+  mode: string;
+  text: string;
+  status: string;
+  before?: string;
+  after?: string;
+  heading?: string;
+  appliedAt?: string;
+  createdAt: string;
+}
+export interface Relationship {
+  id: string;
+  sessionId: string;
+  notePath: string;
+  relation: string;
+  evidence: string;
+  status: string;
+}
+export interface Config {
+  vault: {
+    root: string;
+    count: number;
+    links: number;
+    types: Record<string, number>;
+    warnings: string[];
+    indexedAt: string | null;
+  };
+  provider: "ollama" | "openai";
+  cloud: boolean;
+  localModel: string;
+  openaiConfigured: boolean;
+  chatModels: { name: string; provider: "ollama" | "openai"; cloud: boolean }[];
+  cloudModelError: string;
+  models: {
+    name: string;
+    size: number;
+    capabilities: string[];
+    cloud: boolean;
+  }[];
+  modelError: string;
+  embeddingModel: string;
+  semantic: {
+    running: boolean;
+    done: number;
+    total: number;
+    cached: number;
+    error: string;
+    stale: boolean;
+  };
+  zoteroDir: string;
+  linkedDir: string;
+  aiConfigured: boolean;
+  aiEnabled: boolean;
+  model: string;
+  bridge: boolean;
+  port: number;
+  dataDir: string;
+}
+export interface Bootstrap {
+  token: string;
+  config: Config;
+  workspaces: Workspace[];
+  sources: Source[];
+  sessions: Session[];
+  promotions: Promotion[];
+  relationships: Relationship[];
+}

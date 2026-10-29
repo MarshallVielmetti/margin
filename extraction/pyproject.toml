@@ -1,0 +1,8 @@
+[project]
+name = "margin-pdf-extraction"
+version = "0.1.0"
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[project.optional-dependencies]
+paddle = ["paddleocr[doc-parser]>=3.3,<4", "paddlepaddle>=3.2,<4"]
