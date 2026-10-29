@@ -16,7 +16,7 @@ export function autoLocalAvailable(models) {
 // a bounded classifier call; it can remain loaded when it also answers the query.
 export async function routeLocal(
   ollama,
-  { question, mode, anchor, history, researchQuestion },
+  { question, mode, anchor, history, researchQuestion, signal },
 ) {
   try {
     const response = await ollama.request(
@@ -53,17 +53,16 @@ Return JSON with route (fast or deep) and a brief reason describing task complex
               mode,
               passage: anchor?.quote?.slice(0, 2500),
               researchQuestion: researchQuestion.slice(0, 1000),
-              history: history
-                .slice(-3)
-                .map((a) => ({
-                  origin: a.origin,
-                  text: a.text.slice(0, 1000),
-                })),
+              history: history.slice(-3).map((a) => ({
+                origin: a.origin,
+                text: a.text.slice(0, 1000),
+              })),
             }),
           },
         ],
       },
       20_000,
+      signal,
     );
     const result = JSON.parse(response.message?.content || "");
     if (

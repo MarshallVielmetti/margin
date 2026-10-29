@@ -509,6 +509,30 @@ export function PromotionReview({
           Show unchanged text
         </label>
       </div>
+      {draft.origin === "ai" && (
+        <div className="inline-notice">
+          <strong>AI-generated proposal · requires your review</strong>
+          {draft.rationale && <p>{draft.rationale}</p>}
+          {draft.assumptions?.length ? (
+            <p>Assumptions: {draft.assumptions.join("; ")}</p>
+          ) : null}
+          {draft.evidenceIds?.length ? (
+            <p>
+              Supporting evidence:{" "}
+              {draft.evidenceIds.map((id) => (
+                <a
+                  key={id}
+                  href={`/api/evidence/${encodeURIComponent(id)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {id}{" "}
+                </a>
+              ))}
+            </p>
+          ) : null}
+        </div>
+      )}
       <div className="diff" aria-label="Proposed changes">
         {changes.map((part, i) =>
           part.added || part.removed || full ? (
@@ -545,6 +569,15 @@ export function PromotionReview({
             >
               {onBack ? "Back to wording" : "Close preview"}
             </button>
+            {draft.origin === "ai" && (
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => void act("discard")}
+              >
+                Reject proposal
+              </button>
+            )}
             <button
               className="primary"
               disabled={busy}

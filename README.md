@@ -4,7 +4,7 @@ A local research reading desk for Zotero PDFs, Obsidian notes, and source-ground
 
 ## Run
 
-Use Node.js 22.13 or newer.
+Use Node.js 22.19.0 or newer.
 
 ```sh
 npm install
@@ -126,3 +126,20 @@ Browser verification confirmed the note deep link opens the PDF and exposes the 
 The updated Obsidian plugin must be reloaded before its new command appears.
 
 Core modules: `server/zotero.mjs`, `server/ollama.mjs`, `server/retrieval.mjs`, `server/tutor.mjs`, `server/app.mjs`, and `obsidian-bridge/main.js`.
+
+## Research harness
+
+The notebook now saves each research request as a durable run. It can identify
+numbered references from the active source's full bibliography without a model,
+show named inline citations with exact evidence previews, and stream research
+activity with Stop and Continue controls. The existing prompt model selector
+continues to select the provider for each run.
+
+The default runtime uses bounded Ollama/OpenAI adapters. A second local
+llama.cpp adapter and an embedded Pi candidate are available for explicit
+integration tests; Pi adoption stays gated until the selected local endpoint
+passes the checks in [the runtime audit](docs/pi-runtime-audit.md).
+
+See [implementation and validation](docs/agent-harness-implementation.md) for the
+API contracts, feature flags, migration/rollback procedure, tested behavior,
+and remaining live acceptance checks. Existing saved artifacts remain readable.

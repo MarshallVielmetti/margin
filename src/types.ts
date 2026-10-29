@@ -31,7 +31,7 @@ export interface Artifact {
   sessionId: string;
   text: string;
   kind: string;
-  origin: "user" | "ai" | "prompt";
+  origin: "user" | "ai" | "prompt" | "tool";
   anchor?: Anchor;
   assumptions?: string;
   status: string;
@@ -39,6 +39,20 @@ export interface Artifact {
   model?: string;
   provider?: string;
   cloud?: boolean;
+  referenceResults?: {
+    label: string;
+    status: string;
+    page?: number;
+    pages?: number[];
+    text?: string;
+    candidates?: { text: string; page: number }[];
+    extractionStatus?: string;
+    reason?: string;
+    metadataMatch?: { status: string; title?: string; matchedBy?: string };
+  }[];
+  runId?: string;
+  runStatus?: string;
+  partial?: boolean;
   routing?: { model: string; reason: string; fallback: boolean };
   retrievalWarning?: string;
   evidence?: {
@@ -48,6 +62,15 @@ export interface Artifact {
     path?: string;
     line?: number;
     text: string;
+    sourceId?: string;
+    kind?: string;
+    section?: string;
+    revision?: string;
+    locator?: Record<string, unknown>;
+    provenance?: { origin?: string; status?: string; method?: string };
+    handles?: string[];
+    loadedInPrompt?: boolean;
+    state?: string;
   }[];
 }
 export interface Session {
@@ -80,6 +103,10 @@ export interface Note {
   backlinks?: { path: string; title: string; section: string; line: number }[];
 }
 export interface Promotion {
+  origin?: string;
+  evidenceIds?: string[];
+  assumptions?: string[];
+  rationale?: string;
   id: string;
   sessionId: string;
   path: string;
@@ -101,6 +128,12 @@ export interface Relationship {
   status: string;
 }
 export interface Config {
+  vaultId?: string;
+  features?: {
+    agentHarness: boolean;
+    citations: boolean;
+    sourceExpansion: boolean;
+  };
   vault: {
     root: string;
     count: number;

@@ -1,12 +1,25 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, resolve, relative, dirname, sep, extname } from "node:path";
+import {
+  basename,
+  resolve,
+  relative,
+  dirname,
+  sep,
+  extname,
+  posix,
+} from "node:path";
 import { createHash } from "node:crypto";
 import YAML from "yaml";
 
 export const digest = (value) =>
   createHash("sha256").update(value).digest("hex");
 export const cleanLink = (value) =>
-  value.split("|")[0].split("#")[0].replace(/\.md$/i, "").trim();
+  String(value || "")
+    .replace(/^!/, "")
+    .split("|")[0]
+    .split("#")[0]
+    .replace(/\.md$/i, "")
+    .trim();
 const normalize = (value) => value.normalize("NFKC").toLocaleLowerCase();
 const stop = new Set(
   "this that with from have which there their when where what your about then into does these those each some such them they will would should could through under notes note source explain result theorem".split(
@@ -35,9 +48,11 @@ export function parseNote(path, content) {
   const lines = content.split("\n");
   const headings = [],
     links = [],
-    callouts = [];
+    callouts = [],
+    blockIds = [];
   let fence = null,
     section = "Overview",
+    headingStack = [],
     fmLines = content.slice(0, frontmatterEnd).split("\n").length - 1;
   lines.forEach((line, i) => {
     if (i < fmLines) return;
@@ -51,20 +66,49 @@ export function parseNote(path, content) {
     const h = line.match(/^(#{1,6})\s+(.+?)\s*#*\r?$/);
     if (h) {
       section = h[2];
-      headings.push({ title: section, level: h[1].length, line: i + 1 });
+      const level = h[1].length;
+      while (headingStack.length && headingStack.at(-1).level >= level)
+        headingStack.pop();
+      const headingPath = [
+        ...headingStack.map((entry) => entry.title),
+        section,
+      ];
+      headings.push({ title: section, level, line: i + 1, headingPath });
+      headingStack.push({ title: section, level });
     }
     const c = line.match(/^\s*>\s*\[!([^\]]+)\][+-]?\s*(.*)/);
     if (c) callouts.push({ type: c[1], title: c[2], line: i + 1, section });
     for (const m of line.matchAll(/(!?)\[\[([^\]]+)\]\]/g)) {
+      const originalTarget = m[2];
+      const [linkTarget, alias] = originalTarget.split("|");
+      const hashAt = linkTarget.indexOf("#");
+      const fragment = hashAt < 0 ? "" : linkTarget.slice(hashAt + 1).trim();
+      const blockId = /^\^([\p{L}\p{N}_-]+)$/u.exec(fragment)?.[1] || null;
       links.push({
-        target: cleanLink(m[2]),
-        display: m[2].split("|")[1] || m[2],
+        // `target` remains the path-only legacy field. Keep the exact wikilink
+        // input beside it so heading and block anchors are never discarded.
+        target: cleanLink(originalTarget),
+        originalTarget,
+        raw: m[0],
+        display: alias || linkTarget,
+        fragment,
+        blockId,
         section,
+        headingPath: [...headingStack.map((entry) => entry.title)],
         line: i + 1,
         embedded: !!m[1],
         relation: "explicit-link",
         evidence: line.trim(),
       });
+    }
+    if (!fence) {
+      for (const match of line.matchAll(/(?:^|\s)\^([\p{L}\p{N}_-]+)\s*$/gu))
+        blockIds.push({
+          id: match[1],
+          line: i + 1,
+          section,
+          headingPath: [...headingStack.map((entry) => entry.title)],
+        });
     }
   });
   const tags = [
@@ -98,13 +142,20 @@ export function parseNote(path, content) {
     : metadata.aliases
       ? [String(metadata.aliases)]
       : [];
-  const sections = headings.map((h, i) => ({
-    ...h,
-    endLine: (headings[i + 1]?.line || lines.length + 1) - 1,
-    text: lines
-      .slice(h.line, (headings[i + 1]?.line || lines.length + 1) - 1)
-      .join("\n"),
-  }));
+  const sections = headings.map((h, i) => {
+    const endLine = (headings[i + 1]?.line || lines.length + 1) - 1;
+    const text = lines.slice(h.line, endLine).join("\n");
+    const sectionBlocks = blockIds.filter(
+      (block) => block.line > h.line && block.line <= endLine,
+    );
+    return {
+      ...h,
+      endLine,
+      startLine: h.line + 1,
+      text,
+      blockIds: sectionBlocks,
+    };
+  });
   return {
     id: path,
     path,
@@ -118,6 +169,7 @@ export function parseNote(path, content) {
     headings,
     sections,
     links,
+    blockIds,
     callouts,
     hash: digest(content),
     zotero: content.match(/zotero:\/\/[^\s)]+/)?.[0],
@@ -168,26 +220,91 @@ export async function scanVault(root) {
   };
 }
 
-export function resolveLinks(notes, link, fromPath = "") {
-  const target = cleanLink(link),
-    candidates = [];
-  const fromRelative = relative(
-    ".",
-    resolve(dirname(fromPath), target),
-  ).replaceAll("\\", "/");
+const slashPath = (value) => String(value || "").replaceAll("\\", "/");
+const withoutMarkdown = (value) => slashPath(value).replace(/\.md$/i, "");
+
+/**
+ * Resolve an Obsidian link without pretending that a shared basename or alias
+ * identifies one note. Exact source-relative and vault-relative paths win;
+ * title, basename, and alias matches remain explicitly ambiguous when shared.
+ */
+export function resolveLinkMatches(notes, link, fromPath = "") {
+  const original =
+    typeof link === "object" && link !== null
+      ? link.originalTarget || link.target || ""
+      : link;
+  const rawTarget = String(original || "")
+    .trim()
+    .split("|")[0];
+  const hashAt = rawTarget.indexOf("#");
+  const fragment = hashAt < 0 ? "" : rawTarget.slice(hashAt + 1).trim();
+  const blockId = /^\^([\p{L}\p{N}_-]+)$/u.exec(fragment)?.[1] || null;
+  const target = cleanLink(original);
+  const exactMatch = (note, matchType) => ({
+    note,
+    matchType,
+    originalTarget: String(original || ""),
+    fragment,
+    blockId,
+  });
+  if (!target) {
+    if (!fromPath || !rawTarget.startsWith("#") || !fragment) return [];
+    const sourcePath = slashPath(fromPath).replace(/^\.\//, "");
+    const exactSource = notes.find(
+      (note) => slashPath(note.path) === sourcePath,
+    );
+    const normalizedSources = notes.filter(
+      (note) => normalize(slashPath(note.path)) === normalize(sourcePath),
+    );
+    const source =
+      exactSource ||
+      (normalizedSources.length === 1 ? normalizedSources[0] : null);
+    return source ? [exactMatch(source, "local-fragment")] : [];
+  }
+  const targetKey = normalize(withoutMarkdown(target));
+
+  if (fromPath) {
+    const relativeTarget = posix.normalize(
+      posix.join(posix.dirname(slashPath(fromPath)), withoutMarkdown(target)),
+    );
+    if (relativeTarget !== ".." && !relativeTarget.startsWith("../")) {
+      const relativeMatches = notes.filter(
+        (note) =>
+          normalize(withoutMarkdown(note.path)) === normalize(relativeTarget),
+      );
+      if (relativeMatches.length)
+        return relativeMatches.map((note) =>
+          exactMatch(note, "source-relative-path"),
+        );
+    }
+  }
+
+  // A path-bearing link is an identity request. Do not silently fall back to
+  // another note with the same basename when that path does not exist.
+  if (target.includes("/") || target.startsWith("/")) {
+    const pathKey = normalize(withoutMarkdown(target).replace(/^\/+/, ""));
+    return notes
+      .filter((note) => normalize(withoutMarkdown(note.path)) === pathKey)
+      .map((note) => exactMatch(note, "vault-relative-path"));
+  }
+
+  const candidates = [];
   for (const note of notes) {
-    if (
-      [
-        note.path.replace(/\.md$/i, ""),
-        basename(note.path, ".md"),
-        note.title,
-        ...note.aliases,
-      ].some((v) => normalize(v) === normalize(target)) ||
-      normalize(note.path.replace(/\.md$/i, "")) === normalize(fromRelative)
-    )
-      candidates.push(note);
+    const path = withoutMarkdown(note.path);
+    const base = basename(path);
+    let matchType = null;
+    if (normalize(path) === targetKey) matchType = "vault-relative-path";
+    else if (normalize(note.title) === targetKey) matchType = "title";
+    else if (normalize(base) === targetKey) matchType = "basename";
+    else if (note.aliases.some((alias) => normalize(alias) === targetKey))
+      matchType = "alias";
+    if (matchType) candidates.push(exactMatch(note, matchType));
   }
   return candidates;
+}
+
+export function resolveLinks(notes, link, fromPath = "") {
+  return resolveLinkMatches(notes, link, fromPath).map(({ note }) => note);
 }
 
 export function searchNotes(
