@@ -29,8 +29,38 @@ It reads the PDF in place and stores extracted page text, provenance, and attach
 No upload or duplicate PDF copy is needed.
 Multiple attachments require selection; missing files show a recovery message.
 For linked attachments outside Zotero storage, configure their containing folder in Settings.
-Scanned PDFs can be displayed, but OCR is not included.
+Scanned PDFs can be displayed and parsed locally with the optional PaddleOCR intake engine.
 Reading-note snapshots retain separate provenance and old sessions are preserved.
+
+## Structured PDF reading and intake
+
+Hover a paragraph or equation in the PDF and click to select its region.
+Use **Expand** to select an enclosing definition, theorem, or page, then **Add note**, **Ask about this**, or **Context**.
+The region menu offers the same selection through the keyboard.
+Notes retain page coordinates and extraction revision; earlier region anchors remain usable after a different extraction engine runs.
+
+New PDFs get native text-and-geometry intake automatically.
+Open **Intake & context** in the reader to choose PaddleOCR or an installed local chat model, then **Run / resume intake**.
+Default intake finds related vault passages and region candidates without generating AI summaries.
+A local model additionally produces a summary, assumptions, questions, and proposed note/region connections for every nonempty chunk.
+Intake never selects a cloud model or modifies the vault.
+
+Chunk bundles are durable local records with note snapshots, hashes, model identity, and exact quotations supporting proposed connections.
+Completed chunks are reused on retry; Stop preserves completed work.
+Changed vault contents mark bundles stale and exclude them from tutor requests until intake is rerun.
+The tutor automatically receives current context for the selected region and its enclosing block.
+Use the download button beside **Intake & context** to export the full chunk JSON for another local agent or LLM.
+
+PaddleOCR is optional and uses its own locked uv environment:
+
+```sh
+uv sync --project extraction --extra paddle --python 3.12 --locked
+```
+
+The PaddleOCR selector can also set up this environment on first use, if `uv` is on the server's PATH.
+Initial extraction downloads official model weights; subsequent inference runs locally on CPU.
+Native grouping and definition/theorem boundaries are heuristic, and recognized equations and inferred relationships require source checking.
+See [the intake contracts and validation notes](docs/structured-pdf-intake.md).
 
 ## Research tutor models
 
@@ -90,7 +120,7 @@ npm test
 npm run build
 ```
 
-30 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
+43 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
 Live validation opened the existing 10-page Tsitsiklis PDF, retrieved a cited `gemma4:12b` answer, and built the full semantic index.
 Browser verification confirmed the note deep link opens the PDF and exposes the local tutor controls.
 The updated Obsidian plugin must be reloaded before its new command appears.

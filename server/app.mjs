@@ -1,3 +1,4 @@
+import { Intake } from "./intake.mjs";
 import { homedir } from "node:os";
 import { Ollama } from "./ollama.mjs";
 import { DEFAULT_LOCAL_MODEL, openAIModels } from "./models.mjs";
@@ -30,6 +31,16 @@ const anchorSchema = z.object({
   page: z.number().int().positive(),
   quote: z.string().max(10000).default(""),
   section: z.string().max(500).optional(),
+  regionId: z.string().max(250).optional(),
+  revision: z.string().max(100).optional(),
+  box: z
+    .tuple([
+      z.number().min(0).max(1),
+      z.number().min(0).max(1),
+      z.number().min(0).max(1),
+      z.number().min(0).max(1),
+    ])
+    .optional(),
 });
 const artifactSchema = z.object({
   text: string,
@@ -61,6 +72,7 @@ export async function createApp({
   fetchImpl,
   ollamaUrl = "http://127.0.0.1:11434",
   zoteroDir = resolve(homedir(), "Zotero"),
+  intakeExtractors,
 }) {
   const app = express(),
     token = randomBytes(32).toString("hex");
@@ -262,12 +274,95 @@ export async function createApp({
       .list("artifact")
       .filter((a) => a.sessionId === id)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  async function sourcePdf(source) {
+    if (source.localFile) {
+      const file = await checkedPdf(source.localFile, library().roots);
+      if (file.fingerprint !== source.fingerprint)
+        throw fail(
+          "This Zotero PDF changed. Reopen the literature note to refresh its extracted text.",
+        );
+      return file.path;
+    }
+    if (!source.file || basename(source.file) !== source.file)
+      throw fail("This source has no PDF.", 404);
+    return resolve(uploads, source.file);
+  }
+  const intake = new Intake({
+    store,
+    retrieval,
+    ollama,
+    getSource: (id) => get("source", id),
+    getFile: sourcePdf,
+    getNotes: async () => {
+      if (vault.root) await reindex(vault.root);
+      return vault.notes;
+    },
+    getModels: () => models,
+    ...(intakeExtractors ? { extractors: intakeExtractors } : {}),
+  });
+  function layoutFor(sourceId, revision) {
+    const current = store.get("documentLayout", `layout:${sourceId}`);
+    return !revision || current?.revision === revision
+      ? current
+      : store.get("layoutSnapshot", `layout-version:${sourceId}:${revision}`);
+  }
+  function queueIntake(source) {
+    if (source.kind === "pdf" && !intake.state(source.id).layout)
+      intake.start(source.id);
+    return sourceMeta(source);
+  }
+  app.get("/api/sources/:id/regions", (req, res) => {
+    get("source", req.params.id);
+    res.json(intake.state(req.params.id));
+  });
+  app.post("/api/sources/:id/intake", (req, res) => {
+    const input = z
+      .object({
+        extractor: z.enum(["native", "paddle"]).default("native"),
+        model: z.string().max(200).default(""),
+        force: z.boolean().default(false),
+      })
+      .parse(req.body);
+    res.json(intake.start(req.params.id, input));
+  });
+  app.post("/api/sources/:id/intake/cancel", (req, res) => {
+    get("source", req.params.id);
+    res.json(intake.cancel(req.params.id));
+  });
+  app.get("/api/sources/:id/chunks", async (req, res) => {
+    const source = get("source", req.params.id);
+    await sourcePdf(source);
+    // Check freshness against disk, not just the potentially older browser index.
+    const current = vault.root ? (await scanVault(vault.root)).notes : [];
+    const contexts = intake.contexts(
+      source.id,
+      String(req.query.regionId || ""),
+      current,
+      String(req.query.revision || ""),
+    );
+    res.json({
+      schemaVersion: 1,
+      sourceId: source.id,
+      ...intake.state(source.id),
+      contexts,
+    });
+  });
   const requireAnchor = (anchor, source) => {
     if (
       anchor &&
       (anchor.sourceId !== source.id || anchor.page > source.pages.length)
     )
       throw fail("The selected source position is invalid.");
+    if (anchor?.regionId) {
+      const layout = layoutFor(source.id, anchor.revision);
+      const region = layout?.regions.find((r) => r.id === anchor.regionId);
+      if (
+        !region ||
+        region.page !== anchor.page ||
+        (anchor.revision && anchor.revision !== layout.revision)
+      )
+        throw fail("This region changed. Select it again in the PDF.");
+    }
   };
   app.get("/api/bootstrap", (req, res) =>
     res.json({
@@ -440,16 +535,7 @@ export async function createApp({
   });
   app.get("/api/sources/:id/file", async (req, res) => {
     const source = get("source", req.params.id);
-    if (source.localFile) {
-      const file = await checkedPdf(source.localFile, library().roots);
-      if (file.fingerprint !== source.fingerprint)
-        throw fail(
-          "This Zotero PDF changed. Reopen the literature note to refresh its extracted text.",
-        );
-      return res.type("application/pdf").sendFile(file.path);
-    }
-    if (!source.file) throw fail("This source has no PDF.", 404);
-    res.type("application/pdf").sendFile(resolve(uploads, source.file));
+    res.type("application/pdf").sendFile(await sourcePdf(source));
   });
   app.post("/api/sources/from-note", async (req, res) => {
     const { path, attachmentId, noteOnly } = z
@@ -485,10 +571,10 @@ export async function createApp({
             s.attachmentId === attachment.id &&
             s.fingerprint === attachment.fingerprint,
         );
-      if (existing) return res.json(sourceMeta(existing));
+      if (existing) return res.json(queueIntake(existing));
       const pdf = await library().extract(attachment);
       return res.json(
-        sourceMeta(
+        queueIntake(
           store.put("source", {
             title: note.title,
             authors: String(note.metadata.authors || ""),
@@ -575,7 +661,7 @@ export async function createApp({
       file = `${id}.pdf`;
     writeFileSync(resolve(uploads, file), req.file.buffer, { flag: "wx" });
     res.json(
-      sourceMeta(
+      queueIntake(
         store.put("source", {
           id,
           title: String(
@@ -716,8 +802,12 @@ export async function createApp({
       sessionId: session.id,
       createdAt: new Date().toISOString(),
     });
+    const currentNotes =
+      input.anchor?.regionId && vault.root
+        ? (await scanVault(vault.root)).notes
+        : vault.notes;
     const retrieved = await retrieval.retrieve(
-      vault.notes,
+      currentNotes,
       `${input.text} ${input.anchor?.quote || source.pages[session.page - 1]?.slice(0, 800) || source.title}`,
       source,
       embeddingModel(),
@@ -735,7 +825,22 @@ export async function createApp({
             researchQuestion,
           })
         : null;
+    let chunkContext = [];
+    if (input.anchor?.regionId) {
+      await sourcePdf(source);
+      const current = currentNotes;
+      const layout = layoutFor(source.id, input.anchor.revision);
+      const selectedRegion = layout?.regions.find(
+        (r) => r.id === input.anchor.regionId,
+      );
+      const ids = new Set([selectedRegion?.id, selectedRegion?.parentId]);
+      chunkContext = intake
+        .contexts(source.id, "", current, input.anchor.revision)
+        .filter((c) => ids.has(c.regionId) && !c.stale)
+        .slice(0, 3);
+    }
     const answer = await askTutor({
+      chunkContext,
       question: input.text,
       source,
       anchor: input.anchor || { sourceId: source.id, page: session.page },
@@ -901,6 +1006,10 @@ export async function createApp({
       artifacts: store.list("artifact"),
       relationships: store.list("relationship"),
       promotions: store.list("promotion"),
+      documentLayouts: store.list("documentLayout"),
+      layoutSnapshots: store.list("layoutSnapshot"),
+      chunkContexts: store.list("chunkContext"),
+      intakeJobs: store.list("intakeJob"),
     }),
   );
   app.use("/api", (req, res) =>

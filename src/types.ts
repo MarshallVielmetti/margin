@@ -5,6 +5,9 @@ export interface Anchor {
   page: number;
   quote: string;
   section?: string;
+  regionId?: string;
+  revision?: string;
+  box?: [number, number, number, number];
 }
 export interface Workspace {
   id: string;
@@ -145,4 +148,79 @@ export interface Bootstrap {
   sessions: Session[];
   promotions: Promotion[];
   relationships: Relationship[];
+}
+
+export interface Region {
+  id: string;
+  sourceId: string;
+  page: number;
+  kind: string;
+  text: string;
+  box: [number, number, number, number];
+  parentId: string | null;
+  order: number;
+  origin: string;
+  latex?: string;
+  heuristic?: boolean;
+}
+export interface DocumentLayout {
+  sourceId: string;
+  revision: string;
+  extractor: string;
+  regions: Region[];
+  warnings: string[];
+}
+export interface IntakeJob {
+  id: string;
+  sourceId: string;
+  status: string;
+  done: number;
+  total: number;
+  errors: number;
+  message: string;
+  model: string;
+  extractor: string;
+}
+export interface ChunkContext {
+  id: string;
+  regionId: string;
+  status: string;
+  stale: boolean;
+  model: string | null;
+  error?: string;
+  createdAt: string;
+  notes: {
+    path: string;
+    title: string;
+    section?: string;
+    line?: number;
+    excerpt: string;
+    reason: string;
+  }[];
+  candidates: {
+    regionId: string;
+    page: number;
+    kind: string;
+    text: string;
+    reason: string;
+  }[];
+  analysis: null | {
+    summary: string;
+    concepts: string[];
+    assumptions: string[];
+    questions: string[];
+    noteLinks: {
+      path: string;
+      reason: string;
+      sourceQuote: string;
+      targetQuote: string;
+    }[];
+    connections: {
+      regionId: string;
+      relation: string;
+      reason: string;
+      sourceQuote: string;
+      targetQuote: string;
+    }[];
+  };
 }

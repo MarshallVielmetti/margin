@@ -3,6 +3,8 @@ import { getDocument, GlobalWorkerOptions, TextLayer } from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import worker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "./pdf-text-layer.css";
+import type { Region } from "./types";
+import { hitRegions, boxStyle } from "./region-geometry.mjs";
 GlobalWorkerOptions.workerSrc = worker;
 
 export async function extractPdf(
@@ -40,13 +42,28 @@ export async function extractPdf(
 export default function PdfReader({
   sourceId,
   page,
+  regions = [],
+  selectedId,
+  onRegion,
 }: {
   sourceId: string;
   page: number;
+  regions?: Region[];
+  selectedId?: string;
+  onRegion?: (region: Region) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null),
     layerRef = useRef<HTMLDivElement>(null),
     containerRef = useRef<HTMLDivElement>(null);
+  const [hovered, setHovered] = useState<Region | null>(null);
+  const selected = regions.find((r) => r.id === selectedId);
+  const visibleRegions = regions.filter((r) => r.page === page);
+  useEffect(() => {
+    setHovered(null);
+    setError("");
+    setDoc(null);
+  }, [sourceId]);
+  useEffect(() => setHovered(null), [page]);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null),
     [error, setError] = useState(""),
     [width, setWidth] = useState(600);
@@ -132,9 +149,48 @@ export default function PdfReader({
           PDF preview unavailable: {error}. Switch to extracted text.
         </div>
       ) : (
-        <div className="pdf-page">
+        <div
+          className="pdf-page"
+          onPointerMove={(e) => {
+            const b = e.currentTarget.getBoundingClientRect();
+            setHovered(
+              hitRegions(
+                visibleRegions,
+                (e.clientX - b.left) / b.width,
+                (e.clientY - b.top) / b.height,
+              )[0] || null,
+            );
+          }}
+          onPointerLeave={() => setHovered(null)}
+          onClick={(e) => {
+            if (!window.getSelection()?.isCollapsed) return;
+            const b = e.currentTarget.getBoundingClientRect();
+            const hits = hitRegions(
+              visibleRegions,
+              (e.clientX - b.left) / b.width,
+              (e.clientY - b.top) / b.height,
+            );
+            const region = e.altKey
+              ? hits.find((r) => r.id !== selectedId) || hits[0]
+              : hits[0];
+            if (region) onRegion?.(region);
+          }}
+        >
           <canvas ref={canvasRef} />
           <div ref={layerRef} className="textLayer" />
+          {selected?.page === page && (
+            <div
+              className="region-outline pinned"
+              style={boxStyle(selected.box)}
+            >
+              <span>{selected.kind}</span>
+            </div>
+          )}
+          {hovered && hovered.id !== selectedId && (
+            <div className="region-outline hover" style={boxStyle(hovered.box)}>
+              <span>{hovered.kind} · click to select</span>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -60,7 +60,7 @@ import {
   PromotionDialog,
   PromotionReview,
 } from "./Dialogs";
-const PdfReader = lazy(() => import("./PdfReader"));
+const StructuredPdf = lazy(() => import("./StructuredPdf"));
 const nav: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "desk", label: "Reading desk", icon: BookOpen },
   { id: "library", label: "Source library", icon: Library },
@@ -95,6 +95,10 @@ export default function App() {
     [checkpoint, setCheckpoint] = useState(false),
     [connection, setConnection] = useState<Note | null>(null),
     [search, setSearch] = useState("");
+  const [composeAction, setComposeAction] = useState<{
+    tab: "capture" | "tutor";
+    nonce: number;
+  } | null>(null);
   const booted = useRef(false),
     loadSequence = useRef(0);
   const notify = (message: string) => setToast(message);
@@ -472,6 +476,9 @@ export default function App() {
                     onAnchor={(a) => void navigateAnchor(a)}
                     onNote={(t) => void openNote(t)}
                     config={data.config}
+                    onRegionAction={(tab) =>
+                      setComposeAction({ tab, nonce: Date.now() })
+                    }
                   />
                   <Notebook
                     key={session.id}
@@ -483,6 +490,7 @@ export default function App() {
                     onAnchor={(a) => void navigateAnchor(a)}
                     onNote={(t) => void openNote(t)}
                     onError={notify}
+                    composeAction={composeAction}
                     onSettings={() => setView("settings")}
                   />
                   {inspector && (
@@ -877,6 +885,7 @@ function Reader({
   onAnchor,
   onNote,
   config,
+  onRegionAction,
 }: {
   source: Source;
   session: Session;
@@ -884,6 +893,7 @@ function Reader({
   onAnchor: (a: Anchor) => void;
   onNote: (t: string) => void;
   config: Config;
+  onRegionAction: (tab: "capture" | "tutor") => void;
 }) {
   const [format, setFormat] = useState(source.kind === "pdf" ? "pdf" : "text"),
     [outline, setOutline] = useState(false);
@@ -1014,7 +1024,16 @@ function Reader({
         >
           {format === "pdf" ? (
             <Suspense fallback={<Spinner label="Rendering source page…" />}>
-              <PdfReader sourceId={source.id} page={session.page} />
+              <StructuredPdf
+                key={source.id}
+                sourceId={source.id}
+                page={session.page}
+                anchor={anchor}
+                config={config}
+                onAnchor={onAnchor}
+                onNote={onNote}
+                onAction={onRegionAction}
+              />
             </Suspense>
           ) : (
             <>
@@ -1044,7 +1063,7 @@ function Reader({
       <div className="reader-footer">
         <span>
           <span className="tiny-selection" />
-          Select a passage to anchor your thinking
+          Hover or select a passage to anchor your thinking
         </span>
         <div>
           <button

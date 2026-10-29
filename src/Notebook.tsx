@@ -51,6 +51,7 @@ export function Notebook({
   onNote,
   onError,
   onSettings,
+  composeAction,
 }: {
   session: Session;
   anchor: Anchor;
@@ -61,6 +62,7 @@ export function Notebook({
   onNote: (title: string) => void;
   onError: (message: string) => void;
   onSettings: () => void;
+  composeAction?: { tab: "capture" | "tutor"; nonce: number } | null;
 }) {
   const draftKey = `margin-draft-${session.id}`;
   const [draft, setDraft] = useState(
@@ -96,6 +98,12 @@ export function Notebook({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+  useEffect(() => {
+    if (composeAction) {
+      setTab(composeAction.tab);
+      input.current?.focus();
+    }
+  }, [composeAction]);
   async function submit() {
     if (!draft.trim() || busy || modelBusy) return;
     if (tab === "tutor" && !config.aiEnabled) {

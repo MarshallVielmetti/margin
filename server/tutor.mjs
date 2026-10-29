@@ -23,6 +23,7 @@ export async function askTutor({
   provider = "openai",
   mode = "discuss",
   researchQuestion = "",
+  chunkContext = [],
 }) {
   const pageIndex = Math.max(0, (anchor?.page || 1) - 1);
   const evidence = [
@@ -33,6 +34,20 @@ export async function askTutor({
       page: pageIndex + 1,
       text: (source.pages[pageIndex] || "").slice(0, 9000),
     },
+    ...chunkContext.map((c, i) => ({
+      id: `C${i + 1}`,
+      title: `${source.title} · saved chunk context`,
+      kind: "intake context; retrieved passages and AI proposals; unverified",
+      regionId: c.regionId,
+      text: JSON.stringify({
+        analysis: c.analysis,
+        notes: c.notes,
+        candidates: c.candidates,
+        status: c.status,
+        model: c.model,
+        createdAt: c.createdAt,
+      }).slice(0, 6500),
+    })),
     ...notes.map((n, i) => ({
       id: `N${i + 1}`,
       title: n.title,
@@ -61,15 +76,15 @@ export async function askTutor({
   const content = JSON.stringify({
     evidence,
     selection: anchor,
+    contextPolicy:
+      "C evidence contains saved intake artifacts. AI summaries and inferred connections are unverified proposals, not original source claims. Inspect supplied source and target passages before using them.",
     researchQuestion,
-    history: history
-      .slice(-8)
-      .map((a) => ({
-        origin: a.origin,
-        kind: a.kind,
-        text: a.text.slice(0, 1600),
-        assumptions: a.assumptions,
-      })),
+    history: history.slice(-8).map((a) => ({
+      origin: a.origin,
+      kind: a.kind,
+      text: a.text.slice(0, 1600),
+      assumptions: a.assumptions,
+    })),
     question,
   });
   if (provider === "ollama") {
