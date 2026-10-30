@@ -12,11 +12,13 @@ export function AgentActivity({
   onChanged,
   onContinue,
   onError,
+  compact = false,
 }: {
   run: AgentRun;
   onChanged: () => Promise<void>;
   onContinue: (run: AgentRun) => Promise<void>;
   onError: (message: string) => void;
+  compact?: boolean;
 }) {
   const [run, setRun] = useState(initial),
     [events, setEvents] = useState<AgentEvent[]>([]),
@@ -98,6 +100,8 @@ export function AgentActivity({
     .map((event) => String(event.data?.text || event.data?.delta || ""))
     .join("");
   const error = typeof run.error === "string" ? run.error : run.error?.message;
+  if (compact && isTerminalRun(run) && runState(run) === "completed")
+    return null;
   return (
     <section className="agent-activity" aria-label="Research activity">
       <div className="agent-status" role="status" aria-live="polite">
@@ -108,15 +112,18 @@ export function AgentActivity({
             String(progress?.data?.message || "Research run saved")}
         </span>
       </div>
-      {run.usage?.modelCalls === 0 ? (
-        <p className="fine-print">Local bibliography lookup · no model call</p>
-      ) : (
-        run.selection && (
+      {!compact &&
+        (run.usage?.modelCalls === 0 ? (
           <p className="fine-print">
-            {run.selection.cloud ? "Cloud" : "Local"} · {run.selection.model}
+            Local bibliography lookup · no model call
           </p>
-        )
-      )}
+        ) : (
+          run.selection && (
+            <p className="fine-print">
+              {run.selection.cloud ? "Cloud" : "Local"} · {run.selection.model}
+            </p>
+          )
+        ))}
       {!isTerminalRun(run) ? (
         <button
           disabled={stopping}

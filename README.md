@@ -70,7 +70,7 @@ See [the intake contracts and validation notes](docs/structured-pdf-intake.md).
 Start Ollama; Margin discovers installed models and their capabilities, including MLX models.
 Choose a model directly above the tutor’s prompt box, or in **Settings**.
 The default is `qwen3.8:27b-mlx`; your explicit selection is saved across sessions and restarts.
-Use the refresh button beside the model picker after installing another model.
+Use **Model options → Refresh available models** after installing another model.
 Embedding models remain separate in Settings.
 No model is downloaded by Margin.
 
@@ -82,7 +82,7 @@ Invalid routing output or a 20-second router timeout selects Qwen 3.8 for that q
 Answers record the actual responding model, routing reason, router model, and whether fallback occurred.
 Auto routing stays local and never selects a cloud model.
 
-The **Research tutor** offers discussion, recall feedback, assumption checks, related-concept comparison, proof hints, synthesis checkpoints, and refinement of your own explanation.
+The **Tutor** mode answers questions directly; optional commands offer recall practice, assumption checks, connections, proof hints, and investigation. Synthesis has its own document surface.
 The tutor receives the selected source page, selected passage, recent reasoning, research question, and retrieved vault passages.
 Local choices use the [Ollama chat API](https://docs.ollama.com/api/chat) through loopback HTTP.
 The picker groups local models separately from cloud models configured in Ollama and OpenAI.
@@ -100,18 +100,38 @@ Build the semantic index in Settings to embed vault sections locally.
 Unchanged chunks are reused on subsequent builds, and lexical matching plus explicit wiki-links remain available without embeddings.
 Refresh the vault index after external edits and rebuild the semantic index when its status is stale.
 Deleted or changed indexed chunks are excluded from semantic retrieval.
-The completed initial index contains 4,430 passages from 2,407 notes.
+Index sizes depend on the connected vault; Settings reports current coverage.
 
-AI edits remain proposed working-notebook entries.
-Permanent note promotion still uses an explicit preview, review, apply, and undo flow with conflict detection and backups.
-Reading prompts at the bottom of the notebook remain model-free reflection prompts.
+## Chat from Obsidian
+
+The [Margin Research Bridge](obsidian-bridge/README.md) adds **Chat with Margin** to the command palette. From a literature note, open a terminal-style pane beside the note with its Zotero PDF, current note context, persistent conversation, model selection, agent activity, and Stop/Reconnect controls. The note is saved and refreshed before each turn; the PDF remains available through bounded source tools. Install all three bridge files and reload the plugin, and restart Margin after updating the server.
+
+## Working notebook
+
+**Thoughts** preserves personal annotations, source selections, original wording, and later revisions. **Tutor** pairs questions with answers and keeps evidence and activity with their turn. **Synthesis** is the editable literature note: Markdown/LaTeX, wikilinks, a rendered reading view, dictation, local recovery, export, and revision history.
+
+Tab cycles modes from the plain writing areas; Shift+Tab reverses. Escape followed by Tab leaves the editor. Turn cycling off in the notebook inspector for ordinary Tab navigation. Synthesis uses Tab for list indentation and table cells before cycling. Ctrl+Alt+1/2/3 selects a mode; Cmd/Ctrl+J focuses writing; Cmd/Ctrl+Enter captures a thought or asks a question. Each mode retains its draft, cursor, and scroll position. A draft's source anchor freezes when writing or dictation starts.
+
+An associated literature note opens from its **current vault file**, with frontmatter, headings, math, callouts, and links intact. Use **Note options → Connection & relink** to connect or create a note and enable syncing once. The default remains local editing until syncing is enabled. Without a connected vault, write normally and export Markdown.
+
+**Organize new thoughts** proposes focused changes beside their destination, using the original annotations and inspected passages. Keep, Edit, or Dismiss each proposal; related changes can be kept by section. **Use in note** brings a Tutor explanation or selected answer passage into this review. Accepted changes retain authorship, source links, input revisions, and an unverified label. Acceptance does not assert understanding or mathematical correctness. Pending fragments retain their original wording. Dismissed material stays dismissed until edited or explicitly reconsidered.
+
+Choose the synthesis model in **Settings → Synthesis model**. The picker has Local · Ollama, Cloud · Ollama, and Cloud · OpenAI groups, independently of Tutor. The selection is saved across papers and restarts; the default remains `qwen3.8:27b-q4_K_M`. Synthesis requires structured output support; Tutor’s Auto · local routing remains a separate option. An unavailable selection stays visible, with no provider substitution, and pending downloads are discovered on the next organization attempt.
+
+Manual **Organize new thoughts** and **Use in note** use this synthesis selection. Cloud actions show their destination before sending the note, selected thoughts, and inspected passages. Optional **Organize as I read** uses the selected local model and pauses when a cloud synthesis model is selected. A cloud Tutor selection does not change synthesis or enable background cloud requests. Missing models and cancelled runs leave writing and captures intact.
+
+Save status distinguishes local saves, vault sync, offline recovery, and conflicts. Vault synchronization merges independent changes and exposes overlapping blocks for resolution. Reload the updated bridge plugin to coordinate open Obsidian buffers; unsaved buffers pause the write. Without the bridge, select the closed-note option and keep that note closed in Obsidian. Renamed/deleted files require relink or explicit restore. Undo retains unrelated newer edits where a safe inverse exists.
+
+The notebook inspector holds context controls, keyboard preferences, and session data tools. Session-history deletion preserves shared documents, revision history, and suggestion provenance. Creating concept, theorem, and MOC notes remains a separate contextual promotion action.
+
+See [implementation, API contracts, and validation](docs/working-notebook-implementation.md).
 
 ## Storage and boundaries
 
 Session history and settings live in `.data/research.sqlite` unless `RESEARCH_DATA_DIR` is set.
 Zotero PDFs remain in Zotero storage; old uploaded sources, if any, remain in `.data/sources`.
 Back up both the Margin data directory and Zotero library.
-JSON export includes extracted text and history, not PDF bytes.
+JSON export includes extracted text, history, literature documents, all document/annotation revisions, suggestions, contributions, synthesis runs, and notebook state; it excludes PDF bytes.
 Margin binds to loopback and protects mutation endpoints with a per-process token and same-origin checks.
 Vault imports reject traversal and symlink escapes.
 PDF access is restricted to configured attachment folders and validates file identity against extracted text.
@@ -123,10 +143,9 @@ npm test
 npm run build
 ```
 
-52 automated tests cover the local workflow, provenance, promotion conflicts/undo, vault parsing, model discovery and selection, local/cloud request routing, automatic local classification and fallback, Zotero attachment resolution, escaped paths, semantic cache reuse, and stale-chunk exclusion.
-Live validation opened the existing 10-page Tsitsiklis PDF, retrieved a cited `gemma4:12b` answer, and built the full semantic index.
-Browser verification confirmed the note deep link opens the PDF and exposes the local tutor controls.
-The updated Obsidian plugin must be reloaded before its new command appears.
+The automated suite covers persistence, provenance, source selection, model routing, notebook API contracts, frozen multi-region drafts, concurrent edits, merge conflicts, safe undo, incremental suggestions, deduplication, cancellation, and bridge buffer coordination. Tests write only to disposable vaults. Browser acceptance checks cover mode switching, page anchoring, paired tutoring, suggestion acceptance, connected-note syncing, reload recovery, and a narrow-screen reading desk.
+
+The updated Obsidian bridge must be installed/reloaded before buffer coordination is available. Real microphone dictation and concurrent editing in a running Obsidian installation still require live acceptance testing; automated bridge tests use editor stubs.
 
 Core modules: `server/zotero.mjs`, `server/ollama.mjs`, `server/retrieval.mjs`, `server/tutor.mjs`, `server/app.mjs`, and `obsidian-bridge/main.js`.
 

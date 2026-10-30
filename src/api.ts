@@ -20,7 +20,10 @@ export async function api<T = unknown>(
   });
   const result = await response.json();
   if (!response.ok)
-    throw new Error(result.error || `Request failed (${response.status})`);
+    throw Object.assign(
+      new Error(result.error || `Request failed (${response.status})`),
+      { status: response.status, code: result.code, current: result.current },
+    );
   return result;
 }
 export function obsidianUrl(

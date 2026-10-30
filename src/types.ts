@@ -2,6 +2,7 @@ export type View =
   "desk" | "library" | "vault" | "history" | "promotions" | "settings";
 export interface Anchor {
   sourceId: string;
+  scope?: "page" | "paper";
   regions?: RegionAnchor[];
   page: number;
   quote: string;
@@ -41,6 +42,9 @@ export interface Artifact {
   text: string;
   kind: string;
   origin: "user" | "ai" | "prompt" | "tool";
+  revision?: number;
+  surface?: "thoughts" | "tutor";
+  selectedText?: string;
   anchor?: Anchor;
   assumptions?: string;
   status: string;
@@ -137,6 +141,12 @@ export interface Relationship {
   status: string;
 }
 export interface Config {
+  synthesis: {
+    provider: "ollama" | "openai";
+    model: string;
+    cloud: boolean;
+    available: boolean;
+  };
   vaultId?: string;
   features?: {
     agentHarness: boolean;
@@ -268,4 +278,104 @@ export interface ChunkContext {
       targetQuote: string;
     }[];
   };
+}
+
+export type NotebookMode = "thoughts" | "tutor" | "synthesis";
+export interface NotebookDraft {
+  text: string;
+  anchor?: Anchor | null;
+  start: number;
+  end: number;
+  scroll: number;
+  interim: string;
+}
+export interface NotebookState {
+  schemaVersion: 1;
+  mode: NotebookMode;
+  thoughts: NotebookDraft;
+  tutor: NotebookDraft;
+  activeThread: string;
+  synthesis: { start: number; end: number; scroll: number };
+  tabCycles: boolean;
+  updatedAt?: string;
+}
+export interface DocumentBlock {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  section: string;
+}
+export interface LiteratureDocument {
+  id: string;
+  title: string;
+  vaultId: string;
+  notePath: string;
+  sourceIds: string[];
+  markdown: string;
+  revision: number;
+  syncedRevision: number;
+  syncedHash: string | null;
+  syncEnabled: boolean;
+  syncMethod: "bridge" | "closed-note";
+  syncStatus: "local" | "synced" | "offline" | "conflict";
+  syncError?: string;
+  organizeAsRead: boolean;
+  organizationModel: string;
+  legacyOffered: boolean;
+  conflict: {
+    text: string;
+    external: string;
+    externalHash: string;
+    conflicts: {
+      start: number;
+      end: number;
+      base: string;
+      local: string;
+      remote: string;
+    }[];
+  } | null;
+}
+export interface DocumentRevision {
+  id: string;
+  revision: number;
+  parentRevision: number | null;
+  before: string;
+  markdown: string;
+  createdAt: string;
+  attribution: {
+    origin: string;
+    acceptedBy?: string;
+    verified?: boolean;
+    suggestionId?: string;
+  };
+}
+export interface SynthesisSuggestion {
+  id: string;
+  baseRevision: number;
+  target: DocumentBlock;
+  text: string;
+  operation: "replace" | "insert_after";
+  artifactRevisionIds: string[];
+  evidenceIds: string[];
+  rationale: string;
+  inputs: Artifact[];
+  inspectedEvidence: NonNullable<Artifact["evidence"]>;
+  status: "pending" | "accepted" | "dismissed" | "stale";
+  selection: { model: string; provider: string; cloud: boolean };
+}
+export interface SynthesisRun {
+  id: string;
+  status: string;
+  error?: string;
+  selection: { model: string; provider: string; cloud: boolean };
+}
+export interface DocumentView {
+  schemaVersion: 1;
+  document: LiteratureDocument;
+  blocks: DocumentBlock[];
+  suggestions: SynthesisSuggestion[];
+  pending: (Artifact & { artifactRevisionId: string })[];
+  revisions: DocumentRevision[];
+  run: SynthesisRun | null;
 }

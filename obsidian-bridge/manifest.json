@@ -1,9 +1,9 @@
 {
   "id": "margin-bridge",
   "name": "Margin Research Bridge",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "minAppVersion": "1.5.0",
-  "description": "Navigate from Margin to an existing note and section, or return to a captured research session.",
+  "description": "Chat with the Margin agent beside a literature note using PDF and note context, navigate sources, and coordinate literature-note edits.",
   "author": "Margin",
   "isDesktopOnly": true
 }

@@ -278,6 +278,51 @@ export function installAgentAPI(app, services) {
             };
           },
         }));
+      // A linked literature note is intentional context, even when its wording
+      // does not match the question well enough to appear in lexical retrieval.
+      // Read it again for every turn; the index and old chat are not its truth.
+      if (
+        source.notePath &&
+        !excluded.some((item) => item.path === source.notePath)
+      ) {
+        const file = await safeNotePath(getVault().root, source.notePath);
+        if ((await stat(file)).size > 2_000_000)
+          throw fail("This literature note exceeds the 2 MB read limit.");
+        const note = parseNote(source.notePath, await readFile(file, "utf8"));
+        assertVaultScope();
+        getVault().notes = [
+          ...getVault().notes.filter((item) => item.path !== note.path),
+          note,
+        ];
+        const text = note.content.slice(0, 12000);
+        await registerRead(
+          {
+            title: note.title,
+            kind: "vault-note-passage",
+            path: note.path,
+            text,
+            revision: note.hash,
+            handle: "L1",
+            pinned: true,
+            priority: 10,
+            locator: {
+              path: note.path,
+              line: 1,
+              lineStart: 1,
+              lineEnd: text.split("\n").length,
+              truncated: text.length < note.content.length,
+            },
+            provenance: {
+              origin: "vault-note",
+              status: "unverified",
+              authorship: "not-inferred",
+            },
+            retrievalReason:
+              "Current linked literature note; refreshed for this turn",
+          },
+          "linked-literature-note",
+        );
+      }
       const labels = flags().sourceExpansion ? referenceLabels(run.text) : [];
       if (labels.length) {
         emit("tool.started", {
@@ -405,25 +450,73 @@ export function installAgentAPI(app, services) {
       const excludeActivePage = excluded.some(
         (item) => item.sourceId === source.id && item.page === anchor.page,
       );
-      const modelAnchor = excludeActivePage ? { ...anchor, quote: "" } : anchor;
+      const allowedRegions = anchor.regions?.filter(
+        (region) =>
+          !excluded.some(
+            (item) =>
+              item.sourceId === source.id &&
+              evidencePages(item).has(region.page),
+          ),
+      );
+      const modelAnchor = {
+        ...anchor,
+        quote: allowedRegions
+          ? allowedRegions.map((region) => region.quote || "").join("\n\n")
+          : excludeActivePage
+            ? ""
+            : anchor.quote,
+        ...(allowedRegions ? { regions: allowedRegions } : {}),
+      };
       const page = source.pages[anchor.page - 1] || "";
       const chunk = await getChunkContext?.(source, anchor);
-      const text = chunk?.region?.text || anchor.quote || page;
-      if (text && !excludeActivePage) {
+      // Linked note-only sessions use the fresh registered note above. Their
+      // original import is a snapshot and must not compete with current wording.
+      const selectedRegions =
+        source.kind === "reading-note" && source.notePath
+          ? []
+          : chunk?.regions?.length
+            ? chunk.regions
+            : chunk?.region
+              ? [chunk.region]
+              : [
+                  {
+                    text: anchor.quote || page,
+                    page: anchor.page,
+                    id: anchor.regionId,
+                    section: anchor.section,
+                    revision: anchor.revision,
+                    box: anchor.box,
+                  },
+                ];
+      for (const [index, region] of selectedRegions.entries()) {
+        const text = region.text || "";
+        if (
+          !text ||
+          excluded.some(
+            (item) =>
+              item.sourceId === source.id &&
+              evidencePages(item).has(region.page),
+          )
+        )
+          continue;
         await registerRead(
           {
             title: source.title,
             kind: source.kind,
             sourceId: source.id,
-            page: anchor.page,
-            revision: revision(source),
+            page: region.page,
+            regionId: region.id,
+            box: region.box,
+            revision: region.revision || revision(source),
             text: text.slice(0, 12000),
-            handle: "S1",
+            handle: `S${index + 1}`,
             pinned: true,
             locator: {
-              page: anchor.page,
-              section: anchor.section,
-              regionId: anchor.regionId,
+              page: region.page,
+              section: region.section || anchor.section,
+              regionId: region.id,
+              revision: region.revision,
+              box: region.box,
               truncated: text.length > 12000,
             },
             provenance: {
@@ -439,12 +532,20 @@ export function installAgentAPI(app, services) {
         ? []
         : chunk?.contexts || []
       ).entries()) {
+        if (
+          excluded.some(
+            (evidence) =>
+              evidence.sourceId === source.id &&
+              evidencePages(evidence).has(item.page || anchor.page),
+          )
+        )
+          continue;
         await registerRead(
           {
             title: `${source.title} · saved chunk context`,
             kind: "intake-context; AI proposals unverified",
             sourceId: source.id,
-            page: anchor.page,
+            page: item.page || anchor.page,
             text: JSON.stringify(item).slice(0, 6500),
             handle: `C${index + 1}`,
             provenance: {
@@ -703,6 +804,24 @@ export function installAgentAPI(app, services) {
   app.get("/api/runs/:id", (req, res) =>
     res.json(get("agentRun", req.params.id)),
   );
+  // Obsidian's native requestUrl supports authenticated JSON, but not streaming
+  // fetch. Replay the same durable activity events in bounded cursor batches.
+  app.get("/api/runs/:id/progress", (req, res) => {
+    const run = get("agentRun", req.params.id);
+    if (req.headers["x-margin-token"] !== token)
+      throw fail("Reconnect to Margin to read run activity.", 403);
+    const after = Number(req.query.after || "0");
+    if (!Number.isSafeInteger(after) || after < 0)
+      throw fail("Invalid event cursor.");
+    const pending = harness.events(run.id, after);
+    const events = pending.slice(0, 200);
+    res.json({
+      run,
+      events,
+      cursor: events.at(-1)?.sequence ?? events.at(-1)?.seq ?? after,
+      more: pending.length > events.length,
+    });
+  });
   app.post("/api/runs/:id/cancel", (req, res) => {
     get("agentRun", req.params.id);
     res.json(harness.cancel(req.params.id));

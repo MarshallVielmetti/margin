@@ -1,0 +1,75 @@
+.margin-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 14px;
+  background: var(--background-primary);
+}
+.margin-chat-header strong,
+.margin-chat-status,
+.margin-chat-activity,
+.margin-chat-entry > small {
+  font-family: var(--font-monospace);
+}
+.margin-chat-header strong {
+  color: var(--text-accent);
+}
+.margin-chat-context,
+.margin-chat-status,
+.margin-chat-activity,
+.margin-chat-composer small {
+  color: var(--text-muted);
+  font-size: var(--font-smallest);
+  overflow-wrap: anywhere;
+}
+.margin-chat-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.margin-chat-controls select {
+  max-width: 100%;
+}
+.margin-chat-controls input[type="number"] {
+  width: 64px;
+}
+.margin-chat-transcript {
+  flex: 1;
+  min-height: 80px;
+  overflow-y: auto;
+}
+.margin-chat-entry {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.margin-chat-entry > small {
+  color: var(--text-accent);
+}
+.margin-chat-entry p {
+  margin-block: 8px;
+}
+.margin-chat-entry pre {
+  overflow-x: auto;
+}
+.margin-chat-stream {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: var(--font-small);
+  margin: 0;
+}
+.margin-chat-stream:empty,
+.margin-chat-activity:empty {
+  display: none;
+}
+.margin-chat-composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 75px;
+}
+.margin-chat-composer .margin-chat-controls {
+  margin-top: 8px;
+}

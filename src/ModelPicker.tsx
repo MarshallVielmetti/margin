@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { MoreHorizontal, RefreshCw } from "lucide-react";
 import type { Config } from "./types";
 import { api } from "./api";
+import { DEFAULT_ORGANIZATION_MODEL } from "./model-defaults.mjs";
 
 export function ModelPicker({
   config,
@@ -9,17 +10,30 @@ export function ModelPicker({
   onChanged,
   onError,
   onBusyChange,
+  purpose = "tutor",
 }: {
   config: Config;
   disabled?: boolean;
   onChanged: () => Promise<unknown>;
   onError: (message: string) => void;
   onBusyChange?: (busy: boolean) => void;
+  purpose?: "tutor" | "synthesis";
 }) {
   const [saving, setSaving] = useState(false);
-  const value = JSON.stringify([config.provider, config.model]);
-  const available = config.chatModels.some(
-    (m) => m.provider === config.provider && m.name === config.model,
+  const selection =
+    purpose === "synthesis"
+      ? config.synthesis || {
+          provider: "ollama",
+          model: DEFAULT_ORGANIZATION_MODEL,
+          cloud: false,
+        }
+      : config;
+  const choices = config.chatModels.filter(
+    (m) => purpose !== "synthesis" || m.name !== "auto-local",
+  );
+  const value = JSON.stringify([selection.provider, selection.model]);
+  const available = choices.some(
+    (m) => m.provider === selection.provider && m.name === selection.model,
   );
   async function change(next: string) {
     const [provider, model] = JSON.parse(next) as [Config["provider"], string];
@@ -28,9 +42,11 @@ export function ModelPicker({
     try {
       await api(
         "/settings",
-        provider === "ollama"
-          ? { provider, ollamaModel: model, localAiEnabled: true }
-          : { provider, model, aiEnabled: true },
+        purpose === "synthesis"
+          ? { synthesis: { provider, model } }
+          : provider === "ollama"
+            ? { provider, ollamaModel: model, localAiEnabled: true }
+            : { provider, model, aiEnabled: true },
       );
       await onChanged();
     } catch (e) {
@@ -56,32 +72,32 @@ export function ModelPicker({
   return (
     <div className="model-picker">
       <label>
-        <span>Model</span>
+        <span>{purpose === "synthesis" ? "Synthesis model" : "Model"}</span>
         <select
-          aria-label="Tutor model"
+          aria-label={
+            purpose === "synthesis" ? "Synthesis model" : "Tutor model"
+          }
           value={value}
           disabled={disabled || saving}
           onChange={(e) => void change(e.target.value)}
         >
           {!available && (
             <option value={value} disabled>
-              {config.model} · unavailable
+              {selection.model} · unavailable
             </option>
           )}
           {[
             {
               label: "Local · Ollama",
-              models: config.chatModels.filter((m) => !m.cloud),
+              models: choices.filter((m) => !m.cloud),
             },
             {
               label: "Cloud · Ollama",
-              models: config.chatModels.filter(
-                (m) => m.cloud && m.provider === "ollama",
-              ),
+              models: choices.filter((m) => m.cloud && m.provider === "ollama"),
             },
             {
               label: "Cloud · OpenAI",
-              models: config.chatModels.filter((m) => m.provider === "openai"),
+              models: choices.filter((m) => m.provider === "openai"),
             },
           ].map((group) => (
             <optgroup key={group.label} label={group.label}>
@@ -107,15 +123,32 @@ export function ModelPicker({
           ))}
         </select>
       </label>
-      <button
-        className="icon-button"
-        aria-label="Refresh available models"
-        title="Refresh available models"
-        disabled={disabled || saving}
-        onClick={() => void refresh()}
-      >
-        <RefreshCw size={14} className={saving ? "model-refreshing" : ""} />
-      </button>
+      <details className="model-picker-refresh">
+        <summary
+          aria-label={
+            purpose === "synthesis"
+              ? "Synthesis model options"
+              : "Model options"
+          }
+          className="icon-button"
+        >
+          <MoreHorizontal size={16} />
+        </summary>
+        <div>
+          <button disabled={disabled || saving} onClick={() => void refresh()}>
+            <RefreshCw size={14} className={saving ? "model-refreshing" : ""} />{" "}
+            Refresh available models
+          </button>
+          {selection.cloud && (
+            <p>
+              {purpose === "synthesis"
+                ? "Manual synthesis sends the note, selected thoughts, and supporting passages"
+                : "Questions send the selected source, recent reasoning, and retrieved passages"}{" "}
+              to {selection.provider}.
+            </p>
+          )}
+        </div>
+      </details>
     </div>
   );
 }

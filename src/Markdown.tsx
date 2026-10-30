@@ -16,14 +16,25 @@ export function Markdown({
   evidence,
   citationContext,
   onAnchor,
+  note = false,
+  noteTitle,
 }: {
   text: string;
   onNote?: (title: string) => void;
   evidence?: CitationEvidence[];
   citationContext?: Partial<CitationContext>;
   onAnchor?: (anchor: Anchor) => void;
+  note?: boolean;
+  noteTitle?: string;
 }) {
-  const processed = prepareMarkdown(text);
+  let body = note
+    ? text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
+    : text;
+  if (note && noteTitle)
+    body = body.replace(/^(\s*)# ([^\r\n]+)\r?\n/, (line, space, title) =>
+      title.trim() === noteTitle.trim() ? space : line,
+    );
+  const processed = prepareMarkdown(body);
   const components = {
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) =>
       href?.startsWith("#note=") ? (
@@ -63,6 +74,7 @@ export function Markdown({
   return (
     <div className="markdown">
       <ReactMarkdown
+        skipHtml
         remarkPlugins={[remarkGfm, remarkMath, [remarkCitations, { evidence }]]}
         rehypePlugins={[[rehypeKatex, { strict: false, trust: false }]]}
         urlTransform={(url) =>

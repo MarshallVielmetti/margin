@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import {
   ArrowDownToLine,
@@ -43,6 +44,7 @@ import type {
   Bootstrap,
   Config,
   Note,
+  NotebookMode,
   Promotion,
   Relationship,
   Session,
@@ -96,9 +98,16 @@ export default function App() {
     [connection, setConnection] = useState<Note | null>(null),
     [search, setSearch] = useState("");
   const [composeAction, setComposeAction] = useState<{
-    tab: "capture" | "tutor";
+    mode: NotebookMode;
     nonce: number;
+    sourceId: string;
   } | null>(null);
+  const [notebookWide, setNotebookWide] = useState(false);
+  const [mobilePane, setMobilePane] = useState("notebook");
+  const [readerShare, setReaderShare] = useState(
+    () => Number(localStorage.getItem("margin-reader-share")) || 52,
+  );
+  const resizing = useRef(false);
   const pendingCitation = useRef<Anchor | null>(null);
   const booted = useRef(false),
     loadSequence = useRef(0);
@@ -143,16 +152,36 @@ export default function App() {
     setSession(null);
     setSource(null);
     setAnchor(null);
+    setComposeAction(null);
     api<Session>(`/sessions/${sessionId}`)
       .then(async (s) => {
         const src = await api<Source>(`/sources/${s.sourceId}`);
         if (sequence !== loadSequence.current) return;
         setSession(s);
         setSource(src);
+        let linkedAnchor: Anchor | null = null;
+        try {
+          const parsed = JSON.parse(
+            new URLSearchParams(location.search).get("anchor") || "null",
+          );
+          if (
+            parsed?.sourceId === src.id &&
+            Number.isInteger(parsed.page) &&
+            parsed.page >= 1 &&
+            parsed.page <= src.pageCount
+          )
+            linkedAnchor = { ...parsed, quote: "" };
+        } catch {
+          /* An invalid deep link falls back to the saved reading position. */
+        }
+        if (linkedAnchor && linkedAnchor.page !== s.page) {
+          s = { ...s, page: linkedAnchor.page };
+          setSession(s);
+        }
         setAnchor(
           pendingCitation.current?.sourceId === src.id
             ? pendingCitation.current
-            : { sourceId: src.id, page: s.page, quote: "" },
+            : linkedAnchor || { sourceId: src.id, page: s.page, quote: "" },
         );
         pendingCitation.current = null;
       })
@@ -487,7 +516,7 @@ export default function App() {
                     onClick={() => setCheckpoint(true)}
                   >
                     <Bookmark size={14} />
-                    Save checkpoint
+                    Leave a takeaway
                   </button>
                 </div>
                 {session.nextStep && (
@@ -499,7 +528,28 @@ export default function App() {
                   </div>
                 )}
                 <div
-                  className={`desk-panels ${inspector ? "with-inspector" : ""}`}
+                  className="mobile-pane-switch"
+                  role="group"
+                  aria-label="Reading desk view"
+                >
+                  <button
+                    aria-pressed={mobilePane === "reader"}
+                    onClick={() => setMobilePane("reader")}
+                  >
+                    Source
+                  </button>
+                  <button
+                    aria-pressed={mobilePane === "notebook"}
+                    onClick={() => setMobilePane("notebook")}
+                  >
+                    Notebook
+                  </button>
+                </div>
+                <div
+                  className={`desk-panels redesigned-desk ${inspector ? "with-inspector" : ""} ${notebookWide ? "note-wide" : ""} mobile-${mobilePane}`}
+                  style={
+                    { "--reader-share": `${readerShare}%` } as CSSProperties
+                  }
                 >
                   <Reader
                     source={source}
@@ -508,13 +558,76 @@ export default function App() {
                     onAnchor={(a) => void navigateAnchor(a)}
                     onNote={(t) => void openNote(t)}
                     config={data.config}
-                    onRegionAction={(tab) =>
-                      setComposeAction({ tab, nonce: Date.now() })
-                    }
+                    onRegionAction={(mode) => {
+                      setComposeAction({
+                        mode,
+                        nonce: Date.now(),
+                        sourceId: source.id,
+                      });
+                      setMobilePane("notebook");
+                    }}
+                  />
+                  <div
+                    className="desk-divider"
+                    role="separator"
+                    aria-label="Resize source and notebook"
+                    aria-orientation="vertical"
+                    aria-valuemin={30}
+                    aria-valuemax={70}
+                    aria-valuenow={Math.round(readerShare)}
+                    tabIndex={0}
+                    onPointerDown={(event) => {
+                      resizing.current = true;
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                      if (!resizing.current) return;
+                      const bounds =
+                        event.currentTarget.parentElement!.getBoundingClientRect();
+                      const next = Math.max(
+                        30,
+                        Math.min(
+                          70,
+                          ((event.clientX - bounds.left) / bounds.width) * 100,
+                        ),
+                      );
+                      setReaderShare(next);
+                      localStorage.setItem("margin-reader-share", String(next));
+                    }}
+                    onPointerUp={() => (resizing.current = false)}
+                    onPointerCancel={() => (resizing.current = false)}
+                    onKeyDown={(event) => {
+                      if (
+                        ["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                          event.key,
+                        )
+                      ) {
+                        event.preventDefault();
+                        const next =
+                          event.key === "Home"
+                            ? 30
+                            : event.key === "End"
+                              ? 70
+                              : Math.max(
+                                  30,
+                                  Math.min(
+                                    70,
+                                    readerShare +
+                                      (event.key === "ArrowLeft" ? -3 : 3),
+                                  ),
+                                );
+                        setReaderShare(next);
+                        localStorage.setItem(
+                          "margin-reader-share",
+                          String(next),
+                        );
+                      }
+                    }}
                   />
                   <Notebook
                     key={session.id}
                     session={session}
+                    source={source}
                     anchor={anchor}
                     config={data.config}
                     onChanged={refreshSession}
@@ -524,6 +637,8 @@ export default function App() {
                     onError={notify}
                     composeAction={composeAction}
                     onSettings={() => setView("settings")}
+                    wide={notebookWide}
+                    onWide={() => setNotebookWide(!notebookWide)}
                   />
                   {inspector && (
                     <Inspector
@@ -925,7 +1040,7 @@ function Reader({
   onAnchor: (a: Anchor) => void;
   onNote: (t: string) => void;
   config: Config;
-  onRegionAction: (tab: "capture" | "tutor") => void;
+  onRegionAction: (tab: "thoughts" | "tutor") => void;
 }) {
   const [format, setFormat] = useState(source.kind === "pdf" ? "pdf" : "text"),
     [outline, setOutline] = useState(false);
@@ -1708,6 +1823,38 @@ function SettingsView({
           Build / refresh semantic index
         </button>
       </section>
+      <section className="settings-card" aria-label="Synthesis model settings">
+        <div className="settings-card-title">
+          <Sparkles size={22} />
+          <div>
+            <h2>Synthesis model</h2>
+            <p>
+              Choose the model that organizes thoughts and proposes
+              literature-note edits.
+            </p>
+          </div>
+          <Tag tone={config.synthesis?.available ? "green" : ""}>
+            {config.synthesis?.cloud ? "Cloud" : "Local"}
+          </Tag>
+        </div>
+        <ModelPicker
+          config={config}
+          purpose="synthesis"
+          disabled={busy}
+          onChanged={onRefresh}
+          onError={notify}
+        />
+        <p className="fine-print">
+          This selection is saved for all literature notes, independently of
+          Tutor. Synthesis needs a model with structured output support; Auto ·
+          local remains a Tutor option.
+        </p>
+        <p className="fine-print">
+          {config.synthesis?.cloud
+            ? "Manual synthesis sends the note, selected thoughts, and supporting passages to the selected cloud provider. Automatic organization is paused while a cloud model is selected."
+            : "Synthesis stays on this computer. Automatic organization uses this local model when enabled."}
+        </p>
+      </section>
       <section className="settings-card">
         <h2>Zotero PDFs</h2>
         <p>
@@ -1764,8 +1911,8 @@ function SettingsView({
         ))}
         <p className="fine-print">
           AI note changes always create a reviewable proposal. Clear diagnostic
-          details or delete session history from the notebook’s Saved research
-          data controls.
+          details or delete session history from the notebook inspector’s
+          Session data controls.
         </p>
       </section>
       <section className="settings-card">

@@ -37,7 +37,7 @@ export default function StructuredPdf({
   config: Config;
   onAnchor: (a: Anchor) => void;
   onNote: (path: string) => void;
-  onAction: (tab: "capture" | "tutor") => void;
+  onAction: (tab: "thoughts" | "tutor") => void;
 }) {
   const [multiSelect, setMultiSelect] = useState(false);
   const [focusedId, setFocusedId] = useState("");
@@ -365,7 +365,10 @@ export default function StructuredPdf({
                 Expand to {parent.kind}
               </button>
             )}
-            <button className="text-button" onClick={() => onAction("capture")}>
+            <button
+              className="text-button"
+              onClick={() => onAction("thoughts")}
+            >
               Add note
             </button>
             <button className="text-button" onClick={() => onAction("tutor")}>

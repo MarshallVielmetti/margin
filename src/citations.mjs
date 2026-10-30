@@ -95,6 +95,32 @@ function safeVaultPath(path) {
 
 /** Build a source-controlled Obsidian URI from evidence and configured vault identity. */
 export function resolveCitationTarget(evidence, context = {}) {
+  if (
+    evidence?.sourceId &&
+    context.marginOrigin &&
+    (evidence.sessionId || context.sessionId)
+  ) {
+    try {
+      const origin = new URL(context.marginOrigin);
+      if (
+        origin.protocol === "http:" &&
+        ["127.0.0.1", "localhost"].includes(origin.hostname)
+      ) {
+        const anchor = {
+          ...evidence.locator,
+          sourceId: evidence.sourceId,
+          page: evidence.page || evidence.locator?.page || 1,
+        };
+        origin.search = new URLSearchParams({
+          session: evidence.sessionId || context.sessionId,
+          anchor: JSON.stringify(anchor),
+        }).toString();
+        return origin.href;
+      }
+    } catch {
+      /* Fall back to a readable source locator. */
+    }
+  }
   const path = safeVaultPath(evidence?.path);
   const vault = vaultName(
     typeof evidence?.vaultId === "string"

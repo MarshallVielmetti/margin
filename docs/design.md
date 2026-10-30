@@ -4,9 +4,15 @@ Status: Conceptual design specification and architecture baseline.
 Source thread: `documentation/evidence/retrieved-discussion.md` (thread "Design Research Tutor Workflow").
 Supporting evidence: `documentation/evidence/discussion.json` and the user's representative note examples.
 Current implementation: described in `README.md`; see "Current Implementation Baseline" (§19).
-Date of this revision: 2026-10-29.
+Date of this revision: 2026-10-30.
 Reviewer note: this document is a synthesis of a design conversation, not the conversation itself.
 Where the discussion presents an illustrative interaction, this document marks it as illustrative.
+
+## Current notebook workflow (2026-10-30)
+
+The [working notebook redesign](working-notebook-redesign-plan.md) revises the earlier Obsidian-only editing and routine-promotion assumptions. The implemented behavior is documented in [the notebook implementation notes](working-notebook-implementation.md). Those rules govern literature-note editing; the concept/theorem/MOC capabilities described later remain deliberate, separate operations.
+
+Use exactly three modes: **Thoughts**, **Tutor**, and **Synthesis**. They preserve separate drafts, editing positions, and history. Thoughts starts on new sources. Synthesis edits the current literature note, not the imported historical note snapshot. An organization pass proposes bounded edits and never silently replaces the note.
 
 ## 1. Purpose and problem statement
 
@@ -23,7 +29,7 @@ Examples used throughout this document — a Viability Kernel characterization, 
 ## 2. Vision and guiding principles
 
 The central vision is that the research environment makes working with Obsidian effortless without attempting to become a competing Obsidian.
-The canonical editor remains Obsidian, with the user's keybindings, snippets, and rendering.
+The vault Markdown file is the durable literature note. Synthesis is an editing surface for that same note; Open in Obsidian remains available for the user's full keybindings, snippets, and rendering.
 Switching windows is acceptable; what must be eliminated is the *manual overhead* of translating already-understood material into a permanent note.
 The design repeatedly distinguishes what is *fundamental* to the knowledge architecture from what is an *interface convenience*.
 Fundamental requirements should not be coupled to interface choices such as panel placement or control layout.
@@ -45,8 +51,8 @@ The following principles are considered settled and guide every subsequent decis
 These decisions were reached and confirmed across the design conversation.
 They are treated as the initial conceptual specification.
 
-- **Canonical editor:** Obsidian — all existing keybindings, snippets, and rendering.
-- **Integration:** A lightweight Obsidian bridge that handles navigation, note creation, cursor placement, and reviewed edits (alternatives such as capturing the research app itself as the editor were explicitly rejected).
+- **Literature-note editing:** Synthesis and Obsidian edit one logical Markdown document, with local recovery revisions and explicit synchronization.
+- **Integration:** The Obsidian bridge handles navigation and versioned buffer coordination. Direct literature-note editing in Margin is part of the revised product direction.
 - **Capture:** Source-anchored dictation and lightweight writing inside the research application.
 - **Working history:** Persistently stored *outside* the vault, including incomplete reasoning.
 - **Knowledge promotion:** Turn selected insights, derivations, and interpretations into linked Obsidian notes, with destinations chosen deliberately.
@@ -162,7 +168,7 @@ Both should be preserved, but the working history should be the place to look fo
 
 ## 6. Knowledge promotion
 
-Knowledge promotion is the central transformation of the system: turning a selected insight, derivation, or interpretation into a linked Obsidian note.
+The routine reading workflow builds one literature note continuously in Synthesis. Direct writing autosaves; AI-assisted changes are reviewed inline. Knowledge promotion remains a separate deliberate operation for creating or updating concept, theorem, definition, and MOC notes.
 It is distinct from "generate a note," because its input is material the user has already developed during a learning session.
 
 ### 6.1 The basic interaction
@@ -216,11 +222,9 @@ These four stages correspond to the headline workflow **explore → articulate �
 
 ## 7. Obsidian integration
 
-The canonical editor is Obsidian, with all existing keybindings, snippets, and rendering.
-Integration is provided by a lightweight **Obsidian bridge** that handles navigation, note creation, cursor placement, and reviewed edits.
-The bridge is not required for standard Obsidian links to work; it augments them.
-Opening the Obsidian window and placing a cursor for the user is sufficient; it need not stay inside the research application window.
-Since the user commonly works in a split-screen setup, the acceptable cost is the *act of navigation*, not the window switch itself: a button that puts the cursor in the right place in Obsidian and then waits for the user to type is the target experience.
+Synthesis and Obsidian work on the same literature-note Markdown. The application binds an existing note once, preserves its properties and structure, and retains local revisions independently of syncing or model availability.
+The optional bridge provides section navigation and coordinates writes with open editor buffers. Standard Obsidian links still work without it.
+When the bridge is unavailable, syncing requires the explicit closed-note option: the researcher keeps the target note closed in Obsidian. Hash checks alone cannot protect an unsaved editor buffer.
 
 ### 7.1 The capture-to-edit target experience
 
@@ -229,11 +233,12 @@ This eliminates nearly all of the manual overhead of translating understood mate
 
 ### 7.2 Reviewed edits and safety
 
-Every note write is a **reviewed edit**, not an unattended write.
-Each promotion should save both the original and proposed contents before anything is applied, recheck the current file against the preview before applying, refuse stale edits on mismatch, and restore the exact original on undo only if no later edit has changed the applied contents.
-Paths must be constrained to the configured vault; hidden files and symlinked destinations must be rejected.
-These are optimistic concurrency checks, not a filesystem-wide lock on Obsidian or a synchronization service.
-This is the mechanism by which the "directly authorized edits vs. autonomous changes to knowledge" distinction (§13) is enforced at the filesystem boundary.
+Direct typing and dictation are authored edits and autosave without a second approval. Once the literature note is connected and syncing enabled, direct edits and accepted suggestions sync automatically.
+AI condensation and inferred additions remain proposed block edits with Keep, Edit, and Dismiss. Inline acceptance is the review step; it never sets verification or mastery.
+
+Each local edit retains a parent revision, content, timestamp, and attribution. Vault writes compare against the last synced version, merge non-overlapping edits, and expose conflicting blocks for resolution. Writes are serialized per document and use atomic replacement with expected file hashes. The bridge checks the actual open editor buffer before applying a versioned write, and declines dirty buffers.
+Undo applies a safe inverse against the current document; overlapping later changes require manual recovery from retained revisions. Special-purpose promotions keep their existing preview/apply/undo safeguards and share the atomic file writer.
+
 
 ## 8. Literature notes and source notes
 
@@ -358,7 +363,7 @@ The design of the tutor is itself a set of trust decisions.
 - **Evidence retained.** The tutor keeps evidence IDs with its answers and retains the assumptions in play, and is instructed to distinguish user writing from AI inference.
 - **Local prompts are honest.** With no key, capture, source reading, retrieval, review, promotion, and checkpoints still work, but local reflection prompts are explicitly labeled and do not pretend to assess an answer.
 - **No note-modifying model tools.** The model has no tool that can modify notes.
-  All changes to the vault remain reviewed, user-approved edits.
+  Direct writing is user-authored; AI-assisted changes require inline acceptance before vault syncing.
 - **The assistant as tutor.** Where appropriate the tutor helps the user *reconstruct* understanding — for example by asking the user to re-derive a result from first principles — rather than merely supplying it.
   A user error, when surfaceable, becomes an opportunity to deepen understanding rather than being silently corrected.
 
@@ -472,13 +477,13 @@ They protect the user's vault from unowned, unverified change.
 - **Autonomous literature research.** The system can compare a new paper to existing work on request; it does not autonomously research without the user.
 - **MOC reorganization and AI-generated permanent notes.** Always reviewed and user-owned.
 - **Source-note rewriting on reindex.** Source notes are imported as *snapshots*; refreshing the index does not silently rewrite previously captured source evidence.
-- **Every note write goes through the review-and-approve flow**, including user-authored summaries.
+- **AI-assisted note changes require inline acceptance.** Direct user writing autosaves; specialized concept/theorem/MOC promotions retain their deliberate review flow.
 - **Scheduling of revisit events.** Revisit dates are recorded in history but do not schedule notifications.
 
 ## 19. Current implementation baseline and gap analysis
 
 This section maps each design requirement to the current "functional local first release" so that the gap to the spec is explicit.
-The baseline is the local-first application (React/Vite front end, an Express-style local loopback server, a SQLite store, an optional Obsidian bridge plugin), covering the read → capture → connect → promote → revisit path.
+The current local-first baseline uses React/Vite, a guarded loopback server, SQLite, and an optional Obsidian bridge. Reading uses Thoughts → Tutor → Synthesis, with separate drafts and one paper-level literature document. The broader concept-model requirements below still include future capabilities.
 It listens on loopback only, indexes Markdown on startup and on demand, and does not publish or upload the vault.
 Its own stated boundaries match §18.
 
@@ -487,7 +492,7 @@ Its own stated boundaries match §18.
 - **Storage (`server/store.mjs`).** A local SQLite database in WAL mode (`\.data/research.sqlite`) holding session entries, checkpoints, relationships, source text, promotion previews, and original contents for undo.
   This realizes the *persistent working history* and *undo safety* halves of §5 and §7.2.
 - **API (`server/app.mjs`).** Local, guarded endpoints: bootstrap; notes listing and note fetch; related-note lookup; settings; explicit reindex; workspace create/patch; source fetch/download, import-from-note, create-from-text, upload-PDF; session create/fetch/patch; session artifacts, artifact patch, session prompt, session tutor; history export; relationship creation; promotion prepare/apply/undo/discard; and a JSON export of the research record.
-  This is essentially the read → capture → connect → promote API of the workflow, with no unbounded or remote surface.
+  Notebook APIs additionally provide versioned document editing, connection, sync, conflict resolution, safe undo, annotation revision history, independent drafts, bounded organization, and inline suggestion review.
 - **Note understanding (`server/vault.mjs`).** Parsers for YAML and inline tags, aliases, headings, sections, explicit wikilinks, transclusions, and callouts; a resolver that maps a link to one or more note paths via title and alias; section-aware search; and a path guard that rejects content outside the configured vault, hidden files, and symlinked destinations.
   This is the note-level structural understanding of §14.1 and the path safety of §7.2.
 - **Retrieval (`server/retrieval.mjs`).** Chunk-based, lexical matching with cosine similarity, plus use of existing links.
@@ -495,9 +500,9 @@ Its own stated boundaries match §18.
 - **Promotions (`server/promotions.mjs`).** Surgical section updates, summary updates, prepare/apply/undo with optimistic checks on the current file and saved originals — the reviewed-edit model of §7.2.
 - **Tutor (`server/tutor.mjs`, `server/ollama.mjs`).** An evidence-bounded model call with a local-prompt fallback; the local endpoint reflects the "honest when no key" behavior of §12.
 - **Zotero (`server/zotero.mjs`).** Citation-key resolution and an existence check for a local PDF — the read-oriented Zotero integration of §8 and §18.
-- **Front end (`src/`).** Reading desk, library, vault, history, and settings; notebook capture; import / inspector / promotion dialogs; and a PDF reader with extracted per-page text and selectable layers.
+- **Front end (`src/`).** Thoughts annotations, paired Tutor threads, and the Synthesis Markdown editor/reading view. Mode-specific drafts, frozen anchors, cursor and scroll recovery, scoped keyboard cycling, a resizable divider, and a single-pane mobile desk. Diagnostics live in the notebook inspector; concept/theorem promotion is contextual.
   These are the interface affordances whose *underlying operations* are independent of their presentation (§17).
-- **Bridge (`obsidian-bridge/`).** The navigation plugin that opens a note at a heading and places the cursor — the integration of §7, shipped as source and *not* auto-installed.
+- **Bridge (`obsidian-bridge/`).** Note/heading navigation plus versioned write coordination with open Markdown editors. Dirty buffers pause syncing. Shipped as source; installation or reload is explicit.
 - **Tests (`test/`).** Covers note structure and aliases, source-aware retrieval, fenced-code exclusion, callout rendering, summary preservation, stale-preview protection, undo, new-note creation, vault path containment, local request guards, durable storage, and the HTTP and mocked tutor contracts; tests use disposable vaults and never modify the real vault.
 
 ### 19.2 Requirement → status
@@ -506,8 +511,8 @@ Its own stated boundaries match §18.
 | --- | --- |
 | Persistent working history + undo (§5, §7.2) | Implemented (SQLite store + promotion previews/undo). |
 | Reviewed note edits, optimistic concurrency, path guard (§7.2) | Implemented (`promotions.mjs`, `safeNotePath`). |
-| Bidirectional Obsidian integration (§7) | Bridged by optional plugin (not auto-installed); links work without it. |
-| Literature note as durable entry point, `summary` first-class (§8) | Summary and section updates implemented; *progressive, source-verified construction from the session* is partial. |
+| Bidirectional Obsidian integration (§7) | Current-file import, revisioned editing, file merging, and optional editor-buffer coordination; live Obsidian validation remains a release check. |
+| Literature note as durable entry point, `summary` first-class (§8) | Shared paper document, direct editing, opt-in syncing, and incremental source-linked suggestions implemented. Acceptance remains distinct from source verification. |
 | Knowledge promotion to multiple destinations, dedupe, improve-not-create (§6) | Promotion and new-note creation exist; multi-destination routing and "improve existing vs. create" decisions are partial. |
 | Note + passage level, dynamic-view handling, fenced-code exclusion (§14, §14.2) | Note-level parse and fenced-code/`Dataview` handling exist; *passage-level relationship context* is partial. |
 | Typed relationships (§4.1) | Relationships are recorded with relation, evidence, source selection, and session; *richer typing and inference* are partial. |

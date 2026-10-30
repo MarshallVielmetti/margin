@@ -29,6 +29,8 @@ export interface CitationContext {
   vaultId?: string;
   bridge?: boolean;
   sourceId?: string;
+  sessionId?: string;
+  marginOrigin?: string;
 }
 
 export function evidenceAliases(evidence: CitationEvidence): string[];

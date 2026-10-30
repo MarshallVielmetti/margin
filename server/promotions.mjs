@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseDocument } from "yaml";
 import { digest, parseNote, safeNotePath } from "./vault.mjs";
+import { atomicNoteWrite } from "./note-files.mjs";
 
 export function updateSection(content, heading, text, replace = false) {
   const nl = content.includes("\r\n") ? "\r\n" : "\n";
@@ -50,9 +51,23 @@ export function updateSummary(content, text) {
       throw new Error(
         "Fix invalid frontmatter in Obsidian before updating its summary.",
       );
+    const originalRange = doc.get("summary", true)?.range;
     doc.set("summary", text.trim());
+    const serialized = doc.toString();
+    const replacementRange = parseDocument(serialized).get(
+      "summary",
+      true,
+    )?.range;
+    // Serialize the changed scalar with YAML's quoting rules, but splice only
+    // that value into the original frontmatter to retain unrelated formatting.
+    const properties =
+      originalRange && replacementRange
+        ? fm[1].slice(0, originalRange[0]) +
+          serialized.slice(replacementRange[0], replacementRange[1]) +
+          fm[1].slice(originalRange[1])
+        : serialized.trimEnd();
     const nl = content.includes("\r\n") ? "\r\n" : "\n";
-    return `---${nl}${doc.toString().trimEnd().replace(/\r?\n/g, nl)}${nl}---${nl}${content.slice(fm[0].length)}`;
+    return `---${nl}${properties.replace(/\r?\n/g, nl)}${nl}---${nl}${content.slice(fm[0].length)}`;
   }
   return updateSection(content, "Summary", text, true);
 }
@@ -103,20 +118,7 @@ export async function applyPromotion(root, draft) {
     throw new Error(
       "The note changed since this preview. Create a fresh proposal to preserve your edits.",
     );
-  if (draft.mode === "new") writeFileSync(full, draft.after, { flag: "wx" });
-  else {
-    const temp = join(dirname(full), `.margin-${randomUUID()}.tmp`);
-    try {
-      writeFileSync(temp, draft.after, { flag: "wx" });
-      if (digest(readFileSync(full, "utf8")) !== draft.beforeHash)
-        throw new Error(
-          "The note changed while saving. No update was applied.",
-        );
-      renameSync(temp, full);
-    } finally {
-      if (existsSync(temp)) unlinkSync(temp);
-    }
-  }
+  atomicNoteWrite(full, draft.after, draft.beforeHash);
   return { ...draft, status: "applied", appliedAt: new Date().toISOString() };
 }
 

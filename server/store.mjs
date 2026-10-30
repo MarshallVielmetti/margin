@@ -393,6 +393,40 @@ export class Store {
     return row ? parseJson(row.value, `setting ${key}`) : undefined;
   }
 
+  // New notebook records use the existing extensible records schema. Keeping
+  // them outside session-owned kinds makes deletion/purging preserve the note.
+  reviseDocument(id, expectedRevision, markdown, attribution = {}, patch = {}) {
+    return this.transaction(() => {
+      const current = this.get("literatureDocument", id);
+      if (!current || current.revision !== expectedRevision)
+        throw Object.assign(
+          new Error(
+            "This document has newer edits. Recover or merge your draft before saving.",
+          ),
+          { status: 409, code: "DOCUMENT_REVISION_CONFLICT", current },
+        );
+      if (current.markdown === markdown && !Object.keys(patch).length)
+        return current;
+      const revision = current.revision + 1;
+      const record = this.put("documentRevision", {
+        documentId: id,
+        revision,
+        parentRevision: current.revision,
+        before: current.markdown,
+        markdown,
+        attribution,
+        createdAt: new Date().toISOString(),
+      });
+      return this.put("literatureDocument", {
+        ...current,
+        ...patch,
+        markdown,
+        revision,
+        revisionId: record.id,
+      });
+    });
+  }
+
   createAgentRun(run, event = null) {
     return this.transaction(() => {
       if (run.idempotencyKey) {

@@ -54,6 +54,7 @@ async function close() {
   server.close();
   await app.locals.agentHarness?.stop();
   await app.locals.closeIntake?.();
+  await app.locals.closeNotebook?.();
   await vite?.close();
   store.close();
   process.exit(0);

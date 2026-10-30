@@ -406,3 +406,160 @@ test("evidence freshness resolves only a unique exact-hash rename and preserves 
     "Original.md",
   );
 });
+
+test("linked literature note is refreshed and supplied alongside PDF context and chat history", async (t) => {
+  const prompts = [];
+  const fetchImpl = async (url, request) => {
+    if (url.endsWith("/api/tags"))
+      return {
+        ok: true,
+        json: async () => ({
+          models: [{ name: "test-model", capabilities: ["completion"] }],
+        }),
+      };
+    if (url.endsWith("/api/chat")) {
+      const messages = JSON.parse(request.body).messages;
+      prompts.push(
+        JSON.parse(messages.find((message) => message.role === "user").content),
+      );
+      return {
+        ok: true,
+        json: async () => ({
+          message: { content: "A saved discussion of the supplied context." },
+          done: true,
+        }),
+      };
+    }
+    throw new Error("Unexpected endpoint");
+  };
+  const { app, store, call, dir, source, session } = await fixture(
+    t,
+    fetchImpl,
+  );
+  const root = join(dir, "vault");
+  await mkdir(root);
+  await writeFile(
+    join(root, "Paper.md"),
+    "# Personal literature note\nMy initial interpretation: bounded delays.\n",
+  );
+  await call("/settings", { vaultRoot: root });
+  store.put("source", { ...source, notePath: "Paper.md" });
+  const ask = async (key, contextOverrides) => {
+    const run = await call(`/sessions/${session.id}/runs`, {
+      text:
+        key === "first"
+          ? "Explain the paper"
+          : "Compare that with my revised interpretation",
+      idempotencyKey: key,
+      selection: { provider: "ollama", model: "test-model" },
+      budgets: { contextTokens: 32768 },
+      ...(contextOverrides ? { contextOverrides } : {}),
+    });
+    return app.locals.agentHarness.wait(run.id);
+  };
+  const first = await ask("first");
+  assert.equal(first.status, "completed");
+  assert.ok(
+    prompts[0].evidence.some((item) =>
+      item.text.includes("My initial interpretation"),
+    ),
+  );
+  assert.ok(
+    prompts[0].evidence.some((item) =>
+      item.text.includes("Introduction: the relevant citations"),
+    ),
+  );
+  const noteEvidence = store
+    .list("evidenceSnapshot")
+    .find((item) => item.path === "Paper.md");
+  assert.equal(noteEvidence.provenance.origin, "vault-note");
+  assert.equal(noteEvidence.provenance.authorship, "not-inferred");
+  await writeFile(
+    join(root, "Paper.md"),
+    "# Personal literature note\nRevised interpretation: arbitrary delays.\n",
+  );
+  const second = await ask("second");
+  assert.equal(second.status, "completed");
+  assert.ok(
+    prompts[1].evidence.some((item) =>
+      item.text.includes("Revised interpretation"),
+    ),
+  );
+  assert.ok(
+    !prompts[1].evidence.some((item) =>
+      item.text.includes("My initial interpretation"),
+    ),
+  );
+  assert.ok(
+    prompts[1].history.some((item) => item.text.includes("Explain the paper")),
+  );
+  assert.ok(
+    prompts[1].history.some((item) => item.text.includes("saved discussion")),
+  );
+  const excluded = await ask("excluded", {
+    excludedEvidenceIds: [noteEvidence.id],
+  });
+  assert.equal(excluded.status, "completed");
+  assert.ok(
+    !prompts[2].evidence.some((item) =>
+      item.text.includes("Revised interpretation"),
+    ),
+  );
+  store.put("source", {
+    ...source,
+    kind: "reading-note",
+    notePath: "Paper.md",
+    pages: ["Stale original import"],
+  });
+  const noteOnly = await ask("note-only");
+  assert.equal(noteOnly.status, "completed");
+  assert.ok(
+    prompts[3].evidence.some((item) =>
+      item.text.includes("Revised interpretation"),
+    ),
+  );
+  assert.ok(
+    !prompts[3].evidence.some((item) =>
+      item.text.includes("Stale original import"),
+    ),
+  );
+});
+
+test("Obsidian progress polling authenticates and replays bounded event batches without duplicates", async (t) => {
+  const { app, store, boot, raw, call, session } = await fixture(t);
+  const run = await call(`/sessions/${session.id}/runs`, {
+    text: "Identify reference 11",
+    idempotencyKey: "poll",
+  });
+  await app.locals.agentHarness.wait(run.id);
+  assert.equal((await raw(`/runs/${run.id}/progress`)).status, 403);
+  assert.equal(
+    (
+      await raw(`/runs/${run.id}/progress?after=-1`, undefined, {
+        "X-Margin-Token": boot.token,
+      })
+    ).status,
+    400,
+  );
+  for (let index = 0; index < 205; index++)
+    store.appendAgentEvent(run.id, { type: "test.activity", index });
+  const poll = async (after) => {
+    const response = await raw(
+      `/runs/${run.id}/progress?after=${after}`,
+      undefined,
+      { "X-Margin-Token": boot.token },
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const first = await poll(0);
+  assert.equal(first.events.length, 200);
+  assert.equal(first.more, true);
+  const second = await poll(first.cursor);
+  assert.equal(second.more, false);
+  assert.ok(second.events.every((event) => event.seq > first.cursor));
+  const last = await poll(second.cursor);
+  assert.equal(last.events.length, 0);
+  assert.equal(last.cursor, second.cursor);
+  assert.equal(last.run.status, "completed");
+});

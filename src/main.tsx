@@ -6,6 +6,7 @@ import "@fontsource/libre-baskerville/400.css";
 import "@fontsource/libre-baskerville/400-italic.css";
 import "@fontsource/libre-baskerville/700.css";
 import "./style.css";
+import "./notebook.css";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

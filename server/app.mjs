@@ -4,6 +4,7 @@ import { Intake } from "./intake.mjs";
 import { homedir } from "node:os";
 import { Ollama } from "./ollama.mjs";
 import { DEFAULT_LOCAL_MODEL, openAIModels } from "./models.mjs";
+import { DEFAULT_ORGANIZATION_MODEL } from "../src/model-defaults.mjs";
 import { AUTO_LOCAL_MODEL, autoLocalAvailable, routeLocal } from "./router.mjs";
 import { ZoteroLibrary, checkedPdf, citationKey } from "./zotero.mjs";
 import { Retrieval } from "./retrieval.mjs";
@@ -26,6 +27,7 @@ import {
   undoPromotion,
 } from "./promotions.mjs";
 import { askTutor, recallPrompt } from "./tutor.mjs";
+import { installNotebookAPI } from "./notebook-api.mjs";
 
 const string = z.string().trim().min(1).max(100_000);
 const regionSelectionSchema = z.object({
@@ -47,6 +49,7 @@ const selectedAnchors = (anchor) =>
   anchor?.regions?.length ? anchor.regions : anchor?.regionId ? [anchor] : [];
 const anchorSchema = z.object({
   sourceId: z.string(),
+  scope: z.enum(["page", "paper"]).optional(),
   regions: z
     .array(regionSelectionSchema)
     .min(1)
@@ -85,6 +88,8 @@ const artifactSchema = z.object({
     .default("thought"),
   anchor: anchorSchema.optional(),
   assumptions: z.string().max(10000).optional(),
+  surface: z.enum(["thoughts", "tutor"]).optional(),
+  captureKey: z.string().max(250).optional(),
   status: z.enum(["open", "revisit", "understood"]).default("open"),
 });
 const fail = (message, status = 400) =>
@@ -150,6 +155,24 @@ export async function createApp({
       provider() === "openai" ||
       !!models.find((m) => m.name === localModel())?.cloud,
   });
+  const selectedSynthesisModel = () => {
+    const saved = store.setting("synthesisSelection") || {
+      provider: "ollama",
+      model: DEFAULT_ORGANIZATION_MODEL,
+      cloud: false,
+    };
+    const available = chatModels().find(
+      (item) =>
+        item.provider === saved.provider &&
+        item.name === saved.model &&
+        item.name !== AUTO_LOCAL_MODEL,
+    );
+    return {
+      ...saved,
+      cloud: available?.cloud ?? saved.cloud,
+      available: !!available,
+    };
+  };
   const aiConfigured = () =>
     provider() === "ollama"
       ? chatModels().some(
@@ -177,7 +200,7 @@ export async function createApp({
       vault = root
         ? await scanVault(root)
         : { root: "", notes: [], warnings: [], indexedAt: null };
-      store.setting("vaultRoot", root);
+      store.setting("vaultRoot", vault.root);
     } finally {
       indexing = false;
     }
@@ -186,6 +209,7 @@ export async function createApp({
   try {
     await reindex(root);
   } catch (e) {
+    vault.root = root ? resolve(root) : "";
     vault.warnings.push(`Vault not connected: ${e.message}`);
   }
   if (!store.list("workspace").length)
@@ -283,6 +307,7 @@ export async function createApp({
         ? store.setting("localAiEnabled") !== false
         : !!store.setting("aiEnabled")),
     ...selectedModel(),
+    synthesis: selectedSynthesisModel(),
     localModel: localModel(),
     openaiConfigured: !!apiKey,
     chatModels: chatModels(),
@@ -417,24 +442,55 @@ export async function createApp({
     fetchImpl,
     sourcePdf,
     getChunkContext: async (source, anchor) => {
-      if (!anchor.regionId) return {};
+      const selections = selectedAnchors(anchor);
+      if (!selections.length) return {};
       await sourcePdf(source);
       const current = vault.root
         ? (await scanVault(vault.root)).notes
         : vault.notes;
-      const layout = anchor.regionId && layoutFor(source.id, anchor.revision);
-      const region = layout?.regions.find((r) => r.id === anchor.regionId);
-      const ids = new Set([region?.id, region?.parentId]);
-      return {
-        region,
-        contexts: intake
-          .contexts(source.id, "", current, anchor.revision)
-          .filter((item) => ids.has(item.regionId) && !item.stale)
-          .slice(0, 3),
-      };
+      const regions = [],
+        contexts = [],
+        seen = new Set();
+      for (const selection of selections) {
+        const layout = layoutFor(source.id, selection.revision);
+        const region = layout?.regions.find((r) => r.id === selection.regionId);
+        if (!region) continue;
+        regions.push({
+          ...region,
+          revision: selection.revision || layout.revision,
+        });
+        const ids = new Set([region.id, region.parentId]);
+        for (const item of intake
+          .contexts(source.id, "", current, selection.revision)
+          .filter((item) => ids.has(item.regionId) && !item.stale)) {
+          if (!seen.has(item.regionId)) {
+            seen.add(item.regionId);
+            contexts.push(item);
+          }
+        }
+      }
+      return { region: regions[0], regions, contexts: contexts.slice(0, 6) };
     },
   });
   app.locals.agentHarness = agent.harness;
+  installNotebookAPI(app, {
+    store,
+    get,
+    getVault: () => vault,
+    anchorSchema,
+    requireAnchor,
+    ollama,
+    getModels: () => models,
+    selectedSynthesisModel,
+    refreshLocalModels: async () => {
+      models = await ollama.models();
+      modelError = "";
+    },
+    apiKey,
+    fetchImpl,
+    port,
+    onWritten: freshNote,
+  });
   app.get("/api/bootstrap", (req, res) =>
     res.json({
       token,
@@ -523,9 +579,43 @@ export async function createApp({
         localAiEnabled: z.boolean().optional(),
         zoteroDir: z.string().optional(),
         linkedDir: z.string().optional(),
+        synthesis: z
+          .object({
+            provider: z.enum(["ollama", "openai"]),
+            model: z.string().trim().min(1).max(200),
+          })
+          .strict()
+          .optional(),
       })
       .parse(req.body);
     // Validate before persisting any settings so a failed switch is atomic.
+    let synthesis;
+    if (input.synthesis) {
+      const candidate = chatModels().find(
+        (item) =>
+          item.provider === input.synthesis.provider &&
+          item.name === input.synthesis.model &&
+          item.name !== AUTO_LOCAL_MODEL,
+      );
+      if (input.synthesis.provider === "openai" && !apiKey)
+        throw fail(
+          "Set OPENAI_API_KEY in .env and restart Margin to use OpenAI.",
+        );
+      if (
+        !candidate &&
+        !(
+          input.synthesis.provider === "ollama" &&
+          input.synthesis.model === DEFAULT_ORGANIZATION_MODEL
+        )
+      )
+        throw fail(
+          "Choose an available synthesis model, then refresh models. Synthesis uses a specific model rather than Tutor Auto routing.",
+        );
+      synthesis = {
+        ...input.synthesis,
+        cloud: !!candidate?.cloud || input.synthesis.provider === "openai",
+      };
+    }
     if (
       input.ollamaModel !== undefined &&
       !chatModels().some(
@@ -560,6 +650,7 @@ export async function createApp({
       "linkedDir",
     ])
       if (input[key] !== undefined) store.setting(key, input[key]);
+    if (synthesis) store.setting("synthesisSelection", synthesis);
     res.json(config());
   });
   app.post("/api/models/refresh", async (req, res) => {
@@ -810,11 +901,25 @@ export async function createApp({
     const session = get("session", req.params.id),
       input = artifactSchema.parse(req.body);
     requireAnchor(input.anchor, get("source", session.sourceId));
+    if (input.captureKey) {
+      const previous = store
+        .list("artifact")
+        .find(
+          (a) =>
+            a.sessionId === session.id && a.captureKey === input.captureKey,
+        );
+      if (previous) {
+        if (previous.text !== input.text)
+          throw fail("This capture key belongs to different text.", 409);
+        return res.json(previous);
+      }
+    }
     res.json(
       store.put("artifact", {
         ...input,
         sessionId: session.id,
         origin: "user",
+        revision: 0,
         createdAt: new Date().toISOString(),
       }),
     );
@@ -822,10 +927,51 @@ export async function createApp({
   app.patch("/api/artifacts/:id", (req, res) => {
     const artifact = get("artifact", req.params.id);
     const input = z
-      .object({ status: z.enum(["open", "revisit", "understood"]) })
+      .object({
+        status: z.enum(["open", "revisit", "understood"]).optional(),
+        text: string.optional(),
+        anchor: anchorSchema.nullable().optional(),
+        kind: artifactSchema.shape.kind.optional(),
+        expectedRevision: z.number().int().nonnegative().optional(),
+      })
       .parse(req.body);
     if (artifact.origin !== "user")
       throw fail("Learning status applies to your own writing.");
+    if (
+      input.text !== undefined ||
+      input.anchor !== undefined ||
+      input.kind !== undefined
+    ) {
+      if (input.expectedRevision !== (artifact.revision || 0))
+        throw fail(
+          "This annotation has newer edits. Reload it before saving.",
+          409,
+        );
+      if (input.anchor)
+        requireAnchor(
+          input.anchor,
+          get("source", get("session", artifact.sessionId).sourceId),
+        );
+      return res.json(
+        store.transaction(() => {
+          store.put("annotationRevision", {
+            artifactId: artifact.id,
+            revision: artifact.revision || 0,
+            text: artifact.text,
+            anchor: artifact.anchor,
+            assumptions: artifact.assumptions,
+            origin: artifact.origin,
+            createdAt: artifact.updatedAt || artifact.createdAt,
+          });
+          const { expectedRevision, ...changes } = input;
+          return store.put("artifact", {
+            ...artifact,
+            ...changes,
+            revision: (artifact.revision || 0) + 1,
+          });
+        }),
+      );
+    }
     res.json(store.put("artifact", { ...artifact, ...input }));
   });
   app.post("/api/sessions/:id/prompt", (req, res) => {
@@ -1111,6 +1257,7 @@ export async function createApp({
   app.get("/api/export", (req, res) =>
     res.attachment("margin-research-history.json").json({
       schemaVersion: 2,
+      notebookSchemaVersion: 1,
       exportedAt: new Date().toISOString(),
       workspaces: store.list("workspace"),
       sessions: store.list("session"),
@@ -1151,6 +1298,14 @@ export async function createApp({
       memoryProposals: store.list("memoryProposal"),
       researchInquiries: store.list("researchInquiry"),
       learningEvidence: store.list("learningEvidence"),
+      literatureDocuments: store.list("literatureDocument"),
+      documentRevisions: store.list("documentRevision"),
+      annotationRevisions: store.list("annotationRevision"),
+      synthesisSuggestions: store.list("synthesisSuggestion"),
+      synthesisRuns: store.list("synthesisRun"),
+      contributions: store.list("contribution"),
+      notebookStates: store.list("notebookState"),
+      bridgeWrites: store.list("bridgeWrite"),
     }),
   );
   app.use("/api", (req, res) =>
@@ -1166,7 +1321,11 @@ export async function createApp({
       });
     res
       .status(error.status || (error.code === "LIMIT_FILE_SIZE" ? 413 : 400))
-      .json({ error: error.message || "Request failed." });
+      .json({
+        error: error.message || "Request failed.",
+        code: error.code,
+        current: error.current,
+      });
   });
   return app;
 }

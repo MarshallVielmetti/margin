@@ -173,11 +173,18 @@ test("region API persists anchored notes, exports bundles, and supplies fresh in
     anchor: multi,
   });
   assert.deepEqual(
-    multiAnswer.evidence.filter((e) => /^S\d+$/.test(e.id)).map((e) => e.page),
+    multiAnswer.evidence
+      .filter(
+        (e) =>
+          /^S\d+$/.test(e.id) ||
+          e.handles?.some((handle) => /^S\d+$/.test(handle)),
+      )
+      .map((e) => e.page),
     [1, 2],
   );
   assert.equal(
-    multiAnswer.evidence.find((e) => e.id === "S2").regionId,
+    multiAnswer.evidence.find((e) => e.id === "S2" || e.handles?.includes("S2"))
+      .regionId,
     second.id,
   );
   const invalidMulti = await fetch(base + `/sessions/${session.id}/artifacts`, {
