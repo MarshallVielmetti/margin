@@ -1,0 +1,114 @@
+.knowledge-layout {
+  display: grid;
+  grid-template-columns: 225px minmax(0, 1fr);
+  gap: 24px;
+}
+.knowledge-catalog {
+  border-right: 1px solid var(--border, #ddd);
+  padding-right: 16px;
+}
+.knowledge-catalog label,
+.knowledge-content label {
+  display: grid;
+  gap: 5px;
+  margin: 12px 0;
+}
+.knowledge-results {
+  max-height: 65vh;
+  overflow: auto;
+}
+.knowledge-results button {
+  display: grid;
+  text-align: left;
+  width: 100%;
+  gap: 4px;
+  margin: 8px 0;
+}
+.knowledge-results button.active {
+  border-color: var(--accent, #6f785c);
+  background: #eaf0e5;
+}
+.knowledge-results small,
+.knowledge-results span {
+  color: var(--muted, #666);
+  font-size: 11px;
+}
+.knowledge-content {
+  min-width: 0;
+}
+.knowledge-layout input:not([type="checkbox"]),
+.knowledge-layout select,
+.knowledge-layout textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #d9dcd2);
+  border-radius: 6px;
+  background: #fffefa;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+.knowledge-content fieldset {
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 12px;
+}
+.knowledge-export {
+  display: inline-block;
+  margin: 8px 12px;
+  font-size: 12px;
+}
+.knowledge-card {
+  border-top: 1px solid var(--border, #ddd);
+  padding: 12px 0;
+}
+.knowledge-card summary {
+  font-size: 13px;
+  cursor: pointer;
+}
+.knowledge-anchor {
+  padding: 10px;
+  background: #f3f3ef;
+  border-radius: 6px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.knowledge-anchor pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+}
+.knowledge-review textarea {
+  min-height: 70px;
+}
+.knowledge-review button {
+  margin: 4px 6px 4px 0;
+}
+.knowledge-correction {
+  border-left: 3px solid #718262;
+  padding: 8px 12px;
+  background: #eff3eb;
+}
+.knowledge-settings {
+  margin: 24px 0;
+  border-top: 1px solid var(--border, #ddd);
+  padding-top: 16px;
+}
+.knowledge-status {
+  color: #4c6749;
+  font-size: 12px;
+}
+@media (max-width: 750px) {
+  .knowledge-layout {
+    grid-template-columns: 1fr;
+  }
+  .knowledge-results {
+    max-height: 160px;
+  }
+  .knowledge-catalog {
+    border-right: 0;
+  }
+}

@@ -179,13 +179,23 @@ export function parseNote(path, content) {
   };
 }
 
-export async function scanVault(root) {
+export async function scanVault(root, { excludePaths = [] } = {}) {
   const canonical = await realpath(root);
+  const excluded = await Promise.all(
+    excludePaths.map(async (path) => {
+      try {
+        return await realpath(path);
+      } catch {
+        return resolve(await realpath(dirname(resolve(path))), basename(path));
+      }
+    }),
+  );
   if (!(await stat(canonical)).isDirectory())
     throw new Error("Choose a vault directory.");
   const notes = [],
     warnings = [];
   async function walk(dir) {
+    if (excluded.includes(dir)) return;
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (

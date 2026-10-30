@@ -6,6 +6,8 @@ import { createAgentRuntime } from "./agent/runtime.mjs";
 import { createSourceTools } from "./agent/tools/sources.mjs";
 import { createVaultTools } from "./agent/tools/vault.mjs";
 import { createHistoryTools } from "./agent/tools/history.mjs";
+import { createKnowledgeTools } from "./agent/tools/knowledge.mjs";
+import { notePassageProvenance } from "./note-origin.mjs";
 import {
   referenceLabels,
   resolveReferences,
@@ -83,6 +85,7 @@ export function installAgentAPI(app, services) {
     fetchImpl,
     sourcePdf,
     getChunkContext,
+    knowledge,
   } = services;
   const flags = () => ({
     agentHarness: store.setting("agentHarness") !== false,
@@ -204,6 +207,12 @@ export function installAgentAPI(app, services) {
         put: (kind, value) => store.put(kind, value),
       };
       const toolCatalog = [
+        ...(knowledge
+          ? createKnowledgeTools({
+              knowledge,
+              sourceIds: flags().sourceExpansion ? sourceIds : new Set(),
+            })
+          : []),
         ...createSourceTools({
           store: scopedStore,
           getSource: scopedSource,
@@ -312,11 +321,12 @@ export function installAgentAPI(app, services) {
               lineEnd: text.split("\n").length,
               truncated: text.length < note.content.length,
             },
-            provenance: {
-              origin: "vault-note",
-              status: "unverified",
-              authorship: "not-inferred",
-            },
+            provenance: notePassageProvenance(
+              store,
+              getVault().root,
+              note,
+              text,
+            ),
             retrievalReason:
               "Current linked literature note; refreshed for this turn",
           },
@@ -768,6 +778,7 @@ export function installAgentAPI(app, services) {
         sourceIds: [
           ...new Set([
             source.id,
+            ...(knowledge?.preparedSourceIds() || []),
             ...store
               .list("session")
               .filter((item) => item.workspaceId === session.workspaceId)

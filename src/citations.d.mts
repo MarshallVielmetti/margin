@@ -39,6 +39,10 @@ export function resolveEvidenceHandle(
   handle: string,
 ): CitationEvidence | undefined;
 export function citationLabel(evidence: CitationEvidence): string;
+export function sourceCitationAnchor(
+  evidence: CitationEvidence,
+  fallbackSourceId?: string,
+): import("./types").Anchor | undefined;
 export function resolveCitationTarget(
   evidence: CitationEvidence,
   context?: Partial<CitationContext>,

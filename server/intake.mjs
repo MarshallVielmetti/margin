@@ -166,6 +166,7 @@ export class Intake {
     getFile,
     getNotes,
     getModels,
+    onComplete,
     extractors = { native: extractNative, paddle: extractPaddle },
   }) {
     Object.assign(this, {
@@ -176,6 +177,7 @@ export class Intake {
       getFile,
       getNotes,
       getModels,
+      onComplete,
       extractors,
     });
     this.active = new Map();
@@ -428,6 +430,13 @@ export class Intake {
             : "No text regions found. Choose PaddleOCR for scanned pages.",
         finishedAt: new Date().toISOString(),
       });
+      // Preparation is a downstream consumer of extraction, never a second
+      // extractor. Its explicit local-model setting is independent of Tutor.
+      try {
+        await this.onComplete?.(source.id);
+      } catch (error) {
+        save({ preparationWarning: error.message });
+      }
     } catch (error) {
       save({
         status: signal.aborted ? "cancelled" : "failed",

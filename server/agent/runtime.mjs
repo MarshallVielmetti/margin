@@ -38,8 +38,11 @@ Use only registered tools with schema-valid arguments. The tools are read-only; 
 Distinguish loaded evidence from search candidates. Cite only evidence handles supplied in the current context or returned by tools, using the inline token form {{cite:evidence-id}} at the point of use. Never invent a source, theorem, reference, user understanding, or proof step.
 Preserve assumptions and uncertainty. A successful lookup is not a proof that a mathematical claim is true. Keep answers concise and do not reveal private reasoning.`;
 
-export function makeInstructions(mode) {
-  return `${BASE_INSTRUCTIONS}\n\nMode guidance: ${MODE_GUIDANCE[mode] || MODE_GUIDANCE.discuss}`;
+export function makeInstructions(mode, knowledge = false) {
+  const knowledgeGuidance = knowledge
+    ? "\nDiscover retained preparation with knowledge.search; load relevant units or MOC routes. AI cards are discovery guidance, not original evidence. Respect freshness, partial coverage, corrections and rejections. Read actual passages on both sides with source.read or vault.read before citing or applying a comparison. Distinguish source claims, note interpretations with recorded or unknown authorship, and AI inference. Acceptance is not verification. Disclose reliance on retained summaries when originals are unavailable."
+    : "";
+  return `${BASE_INSTRUCTIONS}${knowledgeGuidance}\n\nMode guidance: ${MODE_GUIDANCE[mode] || MODE_GUIDANCE.discuss}`;
 }
 
 function actionEnvelopeSchema(toolDefinitions) {
@@ -467,7 +470,10 @@ export class AgentRuntime {
         );
       return { name: tool.name, description: tool.description, jsonSchema };
     });
-    const systemPrompt = makeInstructions(mode);
+    const systemPrompt = makeInstructions(
+      mode,
+      toolDefinitions.has("knowledge.search"),
+    );
     const actionEnvelope = input.selection?.toolMode === "action-envelope";
     const structuredEnvelope =
       actionEnvelope && tools.length

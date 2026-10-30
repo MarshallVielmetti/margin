@@ -447,7 +447,10 @@ export function createEmbeddedPiRuntimeCandidate(options = {}) {
       schemas.set(tool.name, jsonSchema);
       return { name: tool.name, description: tool.description, jsonSchema };
     });
-    const systemPrompt = makeInstructions(mode);
+    const systemPrompt = makeInstructions(
+      mode,
+      selectedTools.has("knowledge.search"),
+    );
     const initial = buildInitialContext({
       question: input.question,
       mode,

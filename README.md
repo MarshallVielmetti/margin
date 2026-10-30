@@ -65,6 +65,20 @@ Initial extraction downloads official model weights; subsequent inference runs l
 Native grouping and definition/theorem boundaries are heuristic, and recognized equations and inferred relationships require source checking.
 See [the intake contracts and validation notes](docs/structured-pdf-intake.md).
 
+## Living knowledge
+
+Open the library icon beside **Notebook** to inspect persistent knowledge preparation separately from your literature note.
+Every indexed note gets a lightweight manifest, and explicit note/MOC routes coexist with global discovery.
+After PDF region intake, build a model-free extraction map or explicitly select a local model for meaningful unit cards, a coverage-aware overview, and bounded comparison proposals.
+Preparation never changes human prose or curated links.
+Corrections and rejected proposals persist across chats; acceptance remains separate from mathematical verification.
+
+The tutor can discover preparation from earlier chats and other workspaces in the same vault/library, then inspect actual source and note passages for citations.
+Stale generated guidance is withheld from agent loading while current direct note retrieval remains available.
+Background preparation is off by default and has its own local-model setting and budgets.
+The inspector offers cancellation, coverage and provenance details, review controls, and a Markdown snapshot export.
+See [storage, API, validation, and limits](docs/living-knowledge-implementation.md).
+
 ## Research tutor models
 
 Start Ollama; Margin discovers installed models and their capabilities, including MLX models.

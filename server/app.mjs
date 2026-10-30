@@ -1,6 +1,8 @@
 import { exportReadableMarkdown } from "../src/citations.mjs";
 import { installAgentAPI } from "./agent-api.mjs";
 import { Intake } from "./intake.mjs";
+import { Knowledge } from "./knowledge.mjs";
+import { installKnowledgeAPI } from "./knowledge-api.mjs";
 import { homedir } from "node:os";
 import { Ollama } from "./ollama.mjs";
 import { DEFAULT_LOCAL_MODEL, openAIModels } from "./models.mjs";
@@ -111,6 +113,7 @@ export async function createApp({
     token = randomBytes(32).toString("hex");
   let vault = { root: "", notes: [], warnings: [], indexedAt: null },
     indexing = false;
+  let knowledge;
   const ollama = new Ollama(ollamaUrl, fetchImpl);
   const retrieval = new Retrieval(store, ollama);
   let models = [],
@@ -189,6 +192,7 @@ export async function createApp({
     const file = await safeNotePath(vault.root, path);
     const note = parseNote(path, readFileSync(file, "utf8"));
     vault.notes = [...vault.notes.filter((n) => n.path !== path), note];
+    knowledge?.sync();
     return note;
   }
   const uploads = resolve(dataDir, "sources");
@@ -198,9 +202,12 @@ export async function createApp({
     indexing = true;
     try {
       vault = root
-        ? await scanVault(root)
+        ? await scanVault(root, {
+            excludePaths: [resolve(dataDir, "knowledge")],
+          })
         : { root: "", notes: [], warnings: [], indexedAt: null };
       store.setting("vaultRoot", vault.root);
+      knowledge?.sync();
     } finally {
       indexing = false;
     }
@@ -346,6 +353,18 @@ export async function createApp({
       throw fail("This source has no PDF.", 404);
     return resolve(uploads, source.file);
   }
+  knowledge = new Knowledge({
+    store,
+    dataDir,
+    getVault: () => vault,
+    getFile: sourcePdf,
+    getModels: () => models,
+    ollama,
+  });
+  knowledge.sync();
+  installKnowledgeAPI(app, { knowledge, store });
+  app.locals.knowledge = knowledge;
+  app.locals.closeKnowledge = () => knowledge.close();
   const intake = new Intake({
     store,
     retrieval,
@@ -357,6 +376,7 @@ export async function createApp({
       return vault.notes;
     },
     getModels: () => models,
+    onComplete: (sourceId) => knowledge.afterIntake(sourceId),
     ...(intakeExtractors ? { extractors: intakeExtractors } : {}),
   });
   app.locals.closeIntake = () => intake.close();
@@ -393,7 +413,13 @@ export async function createApp({
     const source = get("source", req.params.id);
     await sourcePdf(source);
     // Check freshness against disk, not just the potentially older browser index.
-    const current = vault.root ? (await scanVault(vault.root)).notes : [];
+    const current = vault.root
+      ? (
+          await scanVault(vault.root, {
+            excludePaths: [resolve(dataDir, "knowledge")],
+          })
+        ).notes
+      : [];
     const contexts = intake.contexts(
       source.id,
       String(req.query.regionId || ""),
@@ -428,6 +454,7 @@ export async function createApp({
   };
   const agent = installAgentAPI(app, {
     store,
+    knowledge,
     token,
     get,
     getVault: () => vault,
@@ -446,7 +473,11 @@ export async function createApp({
       if (!selections.length) return {};
       await sourcePdf(source);
       const current = vault.root
-        ? (await scanVault(vault.root)).notes
+        ? (
+            await scanVault(vault.root, {
+              excludePaths: [resolve(dataDir, "knowledge")],
+            })
+          ).notes
         : vault.notes;
       const regions = [],
         contexts = [],
@@ -1054,7 +1085,11 @@ export async function createApp({
     });
     const currentNotes =
       selectedAnchors(input.anchor).length && vault.root
-        ? (await scanVault(vault.root)).notes
+        ? (
+            await scanVault(vault.root, {
+              excludePaths: [resolve(dataDir, "knowledge")],
+            })
+          ).notes
         : vault.notes;
     const retrieved = await retrieval.retrieve(
       currentNotes,
@@ -1284,6 +1319,25 @@ export async function createApp({
       layoutSnapshots: store.list("layoutSnapshot"),
       chunkContexts: store.list("chunkContext"),
       intakeJobs: store.list("intakeJob"),
+      knowledgeSnapshots: knowledge
+        .entities()
+        .filter((e) => !e.redirectTo)
+        .map((e) => ({
+          entityId: e.id,
+          files: knowledge.files.export(e.scope, e.id),
+        })),
+      knowledgeJobs: store
+        .list("knowledgeJob")
+        .filter((j) => j.scope === knowledge.scope()),
+      knowledgeReviews: store
+        .list("knowledgeReview")
+        .filter((r) => r.scope === knowledge.scope()),
+      knowledgeReviewEvents: store
+        .list("knowledgeReviewEvent")
+        .filter((r) => r.scope === knowledge.scope()),
+      knowledgeDependencies: store
+        .list("knowledgeDependency")
+        .filter((r) => r.scope === knowledge.scope()),
       agentRuns: store.list("agentRun"),
       agentEvents: store
         .listAgentRuns()

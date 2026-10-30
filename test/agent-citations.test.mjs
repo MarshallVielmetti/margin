@@ -22,6 +22,7 @@ import {
   resolveEvidenceHandle,
   remarkCitations,
   resolveCitationTarget,
+  sourceCitationAnchor,
 } from "../src/citations.mjs";
 
 const fixture = JSON.parse(
@@ -335,4 +336,31 @@ test("copy/export uses names and locators, preserving code, math, and [11]", () 
   assert.match(output, /\[11\]/);
   assert.match(output, /`literal \[N2\]`/);
   assert.match(output, /\$\[N2\]\$/);
+});
+
+test("structured source citations reopen the exact region and extraction revision", () => {
+  const evidence = {
+    id: "ev_region",
+    title: "OCR result",
+    text: "Exact theorem",
+    sourceId: "paper",
+    page: 3,
+    revision: "source-content-revision",
+    locator: {
+      regionId: "paper:theorem",
+      revision: "extraction-revision",
+      page: 3,
+      box: [0.1, 0.2, 0.8, 0.4],
+    },
+  };
+  assert.deepEqual(sourceCitationAnchor(evidence), {
+    sourceId: "paper",
+    page: 3,
+    quote: "Exact theorem",
+    section: undefined,
+    regionId: "paper:theorem",
+    revision: "extraction-revision",
+    box: [0.1, 0.2, 0.8, 0.4],
+  });
+  assert.equal(sourceCitationAnchor({ ...evidence, page: 0 }), undefined);
 });

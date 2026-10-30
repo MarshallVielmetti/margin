@@ -9,6 +9,7 @@ import {
   safeNotePath,
 } from "../../vault.mjs";
 import { searchPassages } from "../../retrieval.mjs";
+import { notePassageProvenance } from "../../note-origin.mjs";
 
 const candidateStoreLimit = 512;
 const maxNoteBytes = 2_000_000;
@@ -304,19 +305,26 @@ export function createVaultTools({ store, getVault, registerEvidence }) {
             entry.line >= range.lineStart && entry.line <= range.lineEnd,
         )?.id ||
         null;
+      const inputEvidence = evidenceInput(
+        note,
+        {
+          text: range.text,
+          lineStart: range.lineStart,
+          lineEnd: range.lineEnd,
+          headingPath,
+          section: headingPath.at(-1) || section?.title || "Overview",
+          blockId,
+        },
+        context.runId,
+      );
+      inputEvidence.provenance = notePassageProvenance(
+        store,
+        vault.root,
+        note,
+        range.text,
+      );
       const evidence = await registerEvidence(
-        evidenceInput(
-          note,
-          {
-            text: range.text,
-            lineStart: range.lineStart,
-            lineEnd: range.lineEnd,
-            headingPath,
-            section: headingPath.at(-1) || section?.title || "Overview",
-            blockId,
-          },
-          context.runId,
-        ),
+        inputEvidence,
         context.toolCallId,
       );
       abortIfNeeded(context.signal);

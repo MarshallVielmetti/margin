@@ -30,6 +30,8 @@ const schemas = {
     .object({
       sourceId: z.string().trim().min(1).max(200),
       page: z.number().int().min(1).max(MAX_SOURCE_PAGES),
+      regionId: z.string().max(250).optional(),
+      revision: z.string().max(100).optional(),
     })
     .strict(),
   outline: z.object({ sourceId: z.string().trim().min(1).max(200) }).strict(),
@@ -98,6 +100,12 @@ function metadataEvidence(source, revision, kind, locator, text) {
     ...(locator.page ? { page: locator.page } : {}),
     ...(locator.label ? { referenceLabel: locator.label } : {}),
     text,
+    provenance: {
+      origin: source.kind === "pdf" ? "source" : "note",
+      method: "registered-source-read",
+      authorship: source.kind === "pdf" ? "source-author" : "not-inferred",
+      status: "unverified",
+    },
   };
 }
 
@@ -259,24 +267,63 @@ export function createSourceTools({ store, getSource, registerEvidence }) {
     ),
     makeTool(
       "source.read",
-      "Read one bounded page from a registered local source and register its exact excerpt as evidence.",
+      "Read one bounded page or exact extracted region from a registered local source and register its excerpt as evidence. For knowledge anchors include page, regionId and extraction revision to read OCR/structured text exactly.",
       schemas.read,
-      async ({ sourceId, page }, context) => {
+      async (
+        { sourceId, page, regionId, revision: extractionRevision },
+        context,
+      ) => {
         const source = await loadSource(getSource, sourceId, context.signal);
         if (page > source.pages.length)
           throw new Error("The requested page is outside this source.");
-        const raw = textOf(source.pages[page - 1]);
+        const current = regionId
+          ? store.get("documentLayout", `layout:${sourceId}`)
+          : null;
+        const layout =
+          !extractionRevision || extractionRevision === current?.revision
+            ? current
+            : store.get(
+                "layoutSnapshot",
+                `layout-version:${sourceId}:${extractionRevision}`,
+              );
+        const region = layout?.regions.find(
+          (r) => r.id === regionId && r.page === page,
+        );
+        if (regionId && !region)
+          throw new Error(
+            "The extracted region is unavailable; refresh knowledge preparation or inspect the current page.",
+          );
+        const raw = region ? region.text : textOf(source.pages[page - 1]);
         const text = raw.slice(0, MAX_READ_CHARS);
         const revision = revisionForSource(source);
         const evidenceId = await register(
           registerEvidence,
-          metadataEvidence(source, revision, "source-page", { page }, text),
+          metadataEvidence(
+            source,
+            revision,
+            region ? "source-region" : "source-page",
+            {
+              page,
+              ...(region
+                ? {
+                    regionId,
+                    revision: layout.revision,
+                    box: region.box,
+                    historical: layout.revision !== current?.revision,
+                  }
+                : {}),
+            },
+            text,
+          ),
           context,
         );
         return {
           ...publicSource(source, sourceId),
           revision,
           page,
+          ...(region
+            ? { regionId, extractionRevision: layout.revision, box: region.box }
+            : {}),
           text,
           truncated: raw.length > text.length,
           evidenceId,

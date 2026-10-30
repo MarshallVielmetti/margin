@@ -598,6 +598,7 @@ export class Synthesis {
       status: "accepted",
       acceptedRevision: revision,
       acceptedText: proposed,
+      acceptedRenderedText: text,
     });
     for (const c of this.store
       .list("contribution")

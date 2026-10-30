@@ -148,6 +148,10 @@ export function selectRelevantTools(
     "vault.read",
     "vault.resolve_link",
     "workspace.get_context",
+    "knowledge.search",
+    "knowledge.load",
+    "knowledge.connections",
+    "knowledge.children",
   ];
   if (referenceTask)
     desired.push(

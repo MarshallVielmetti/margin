@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Expand, Minimize, Settings2 } from "lucide-react";
+import { Expand, Minimize, Settings2, Library } from "lucide-react";
+import { KnowledgeInspector } from "./KnowledgeInspector";
 import type {
   Anchor,
   Artifact,
@@ -46,6 +47,7 @@ export function Notebook(props: NotebookProps) {
   );
   const [document, setDocument] = useState<DocumentView | null>(null);
   const [inspector, setInspector] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [pinned, setPinned] = useState<string[]>([]),
     [excluded, setExcluded] = useState<string[]>([]);
   const [dataBusy, setDataBusy] = useState(false),
@@ -180,6 +182,14 @@ export function Notebook(props: NotebookProps) {
         <div>
           <button
             className="icon-button"
+            title="Living knowledge and AI preparation"
+            aria-label="Living knowledge and AI preparation"
+            onClick={() => setKnowledgeOpen(true)}
+          >
+            <Library size={16} />
+          </button>
+          <button
+            className="icon-button"
             title={props.wide ? "Restore split view" : "Wider notebook"}
             aria-label={props.wide ? "Restore split view" : "Wider notebook"}
             onClick={props.onWide}
@@ -196,6 +206,15 @@ export function Notebook(props: NotebookProps) {
           </button>
         </div>
       </div>
+      {knowledgeOpen && (
+        <KnowledgeInspector
+          source={source}
+          config={config}
+          onClose={() => setKnowledgeOpen(false)}
+          onAnchor={props.onAnchor}
+          onNote={props.onNote}
+        />
+      )}
       <div className="notebook-mode-strip">
         <div
           role="tablist"

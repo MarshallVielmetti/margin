@@ -13,6 +13,36 @@ const protectedNodeTypes = new Set([
   "definition",
 ]);
 
+export function sourceCitationAnchor(evidence, fallbackSourceId) {
+  const sourceId = evidence.sourceId || fallbackSourceId;
+  const page = Number(evidence.page ?? evidence.locator?.page);
+  if (!sourceId || !Number.isInteger(page) || page < 1) return undefined;
+  const locator = evidence.locator || {};
+  const regionId =
+    typeof locator.regionId === "string"
+      ? locator.regionId
+      : typeof evidence.regionId === "string"
+        ? evidence.regionId
+        : undefined;
+  const box = locator.box || evidence.box;
+  return {
+    sourceId,
+    page,
+    quote: evidence.text,
+    section: evidence.section,
+    regionId,
+    revision:
+      (regionId && typeof locator.revision === "string"
+        ? locator.revision
+        : evidence.revision) || undefined,
+    ...(Array.isArray(box) &&
+    box.length === 4 &&
+    box.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)
+      ? { box }
+      : {}),
+  };
+}
+
 export function evidenceAliases(evidence) {
   return [
     evidence?.id,

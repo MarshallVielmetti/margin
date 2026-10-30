@@ -4,6 +4,7 @@ import {
   readableCitationMarkdown,
   resolveCitationTarget,
   resolveEvidenceHandle,
+  sourceCitationAnchor,
 } from "./citations.mjs";
 import type { CitationContext, CitationEvidence } from "./citations.mjs";
 import type { Anchor } from "./types";
@@ -111,6 +112,7 @@ export function Citation({
             (provenance as Record<string, unknown>).origin,
             (provenance as Record<string, unknown>).kind,
             (provenance as Record<string, unknown>).author,
+            (provenance as Record<string, unknown>).authorship,
             (provenance as Record<string, unknown>).method,
           ]
             .filter((value) => typeof value === "string" && value.trim())
@@ -180,14 +182,8 @@ export function Citation({
   }
 
   function openSourcePage() {
-    if (!sourceId || !hasPage) return;
-    onAnchor?.({
-      sourceId,
-      page,
-      quote: citationSource.text,
-      section: citationSource.section,
-      revision: citationSource.revision || undefined,
-    });
+    const anchor = sourceCitationAnchor(citationSource, sourceId);
+    if (anchor) onAnchor?.(anchor);
   }
 
   return (
